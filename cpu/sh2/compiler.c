@@ -32,8 +32,8 @@
 #include <stdlib.h>
 #include <assert.h>
 
-#include "../../pico/pico_int.h"
-#include "../../pico/arm_features.h"
+#include <pico/pico_int.h>
+#include <pico/arm_features.h>
 #include "sh2.h"
 #include "compiler.h"
 #include "../drc/cmn.h"
@@ -187,26 +187,27 @@ static char sh2dasm_buff[64];
 
 #define SH2_DUMP(sh2, reason) { \
 	char ms = (sh2)->is_slave ? 's' : 'm'; \
-	printf("%csh2 %s %08x\n", ms, reason, (sh2)->pc); \
-	printf("%csh2 r0-7  %08x %08x %08x %08x %08x %08x %08x %08x\n", ms, \
-		(sh2)->r[0], (sh2)->r[1], (sh2)->r[2], (sh2)->r[3], \
-		(sh2)->r[4], (sh2)->r[5], (sh2)->r[6], (sh2)->r[7]); \
-	printf("%csh2 r8-15 %08x %08x %08x %08x %08x %08x %08x %08x\n", ms, \
-		(sh2)->r[8], (sh2)->r[9], (sh2)->r[10], (sh2)->r[11], \
-		(sh2)->r[12], (sh2)->r[13], (sh2)->r[14], (sh2)->r[15]); \
-	printf("%csh2 pc-ml %08x %08x %08x %08x %08x %08x %08x %08x\n", ms, \
-		(sh2)->pc, (sh2)->ppc, (sh2)->pr, (sh2)->sr&0xfff, \
-		(sh2)->gbr, (sh2)->vbr, (sh2)->mach, (sh2)->macl); \
-	printf("%csh2 tmp-p  %08x %08x %08x %08x %08x %08x %08x %08x\n", ms, \
+	printf("%csh2 %s %08lx\n", ms, reason, (ulong)(sh2)->pc); \
+	printf("%csh2 r0-7  %08lx %08lx %08lx %08lx %08lx %08lx %08lx %08lx\n", ms, \
+		(ulong)(sh2)->r[0], (ulong)(sh2)->r[1], (ulong)(sh2)->r[2], (ulong)(sh2)->r[3], \
+		(ulong)(sh2)->r[4], (ulong)(sh2)->r[5], (ulong)(sh2)->r[6], (ulong)(sh2)->r[7]); \
+	printf("%csh2 r8-15 %08lx %08lx %08lx %08lx %08lx %08lx %08lx %08lx\n", ms, \
+		(ulong)(sh2)->r[8], (ulong)(sh2)->r[9], (ulong)(sh2)->r[10], (ulong)(sh2)->r[11], \
+		(ulong)(sh2)->r[12], (ulong)(sh2)->r[13], (ulong)(sh2)->r[14], (ulong)(sh2)->r[15]); \
+	printf("%csh2 pc-ml %08lx %08lx %08lx %08lx %08lx %08lx %08lx %08lx\n", ms, \
+		(ulong)(sh2)->pc, (ulong)(sh2)->ppc, (ulong)(sh2)->pr, (ulong)(sh2)->sr&0xfff, \
+		(ulong)(sh2)->gbr, (ulong)(sh2)->vbr, (ulong)(sh2)->mach, (ulong)(sh2)->macl); \
+	printf("%csh2 tmp-p  %08x %08x %08x %08x %08x %08lx %08x %08x\n", ms, \
 		(sh2)->drc_tmp, (sh2)->irq_cycles, \
 		(sh2)->pdb_io_csum[0], (sh2)->pdb_io_csum[1], (sh2)->state, \
-		(sh2)->poll_addr, (sh2)->poll_cycles, (sh2)->poll_cnt); \
+		(ulong)(sh2)->poll_addr, (sh2)->poll_cycles, (sh2)->poll_cnt); \
 }
 
 #if (DRC_DEBUG & (8|256|512|1024)) || defined(PDB)
 #if (DRC_DEBUG & (256|512|1024))
 static SH2 csh2[2][8];
 static FILE *trace[2];
+static int topen[2];
 #endif
 static void REGPARM(3) *sh2_drc_log_entry(void *block, SH2 *sh2, u32 sr)
 {
@@ -217,12 +218,13 @@ static void REGPARM(3) *sh2_drc_log_entry(void *block, SH2 *sh2, u32 sr)
     pdb_step(sh2, sh2->pc);
 #elif (DRC_DEBUG & 256)
   {
+    static SH2 fsh2;
     int idx = sh2->is_slave;
-    if (!trace[0]) {
+    if (!trace[0] && !topen[0]++) {
       trace[0] = fopen("pico.trace0", "wb");
       trace[1] = fopen("pico.trace1", "wb");
     }
-    if (csh2[idx][0].pc != sh2->pc) {
+    if (trace[idx] && csh2[idx][0].pc != sh2->pc) {
       fwrite(sh2, offsetof(SH2, read8_map), 1, trace[idx]);
       fwrite(&sh2->pdb_io_csum, sizeof(sh2->pdb_io_csum), 1, trace[idx]);
       memcpy(&csh2[idx][0], sh2, offsetof(SH2, poll_cnt)+4);
@@ -233,11 +235,11 @@ static void REGPARM(3) *sh2_drc_log_entry(void *block, SH2 *sh2, u32 sr)
   {
     static SH2 fsh2;
     int idx = sh2->is_slave;
-    if (!trace[0]) {
+    if (!trace[0] && !topen[0]++) {
       trace[0] = fopen("pico.trace0", "rb");
       trace[1] = fopen("pico.trace1", "rb");
     }
-    if (csh2[idx][0].pc != sh2->pc) {
+    if (trace[idx] && csh2[idx][0].pc != sh2->pc) {
       if (!fread(&fsh2, offsetof(SH2, read8_map), 1, trace[idx]) ||
           !fread(&fsh2.pdb_io_csum, sizeof(sh2->pdb_io_csum), 1, trace[idx])) {
         printf("trace eof at %08lx\n",ftell(trace[idx]));
@@ -255,7 +257,7 @@ static void REGPARM(3) *sh2_drc_log_entry(void *block, SH2 *sh2, u32 sr)
 	char *ps = (char *)sh2, *pf = (char *)&fsh2;
 	for (idx = 0; idx < offsetof(SH2, read8_map); idx += sizeof(u32))
 		if (*(u32 *)(ps+idx) != *(u32 *)(pf+idx))
-			printf("diff reg %ld\n",idx/sizeof(u32));
+			printf("diff reg %ld\n",(long)idx/sizeof(u32));
         exit(1);
       }
       csh2[idx][0] = fsh2;
@@ -466,7 +468,7 @@ static void rcache_free_tmp(int hr);
 #include "../drc/emit_mips.c"
 #elif defined(__riscv__) || defined(__riscv)
 #include "../drc/emit_riscv.c"
-#elif defined(__powerpc__)
+#elif defined(__powerpc__) || defined(_M_PPC)
 #include "../drc/emit_ppc.c"
 #elif defined(__i386__) || defined(_M_X86)
 #include "../drc/emit_x86.c"
@@ -716,8 +718,8 @@ static void add_to_hashlist(struct block_entry *be, int tcache_id)
 
 #if (DRC_DEBUG & 2)
   if (be->next != NULL) {
-    printf(" %08x@%p: entry hash collision with %08x@%p\n",
-      be->pc, be->tcache_ptr, be->next->pc, be->next->tcache_ptr);
+    printf(" %08lx@%p: entry hash collision with %08lx@%p\n",
+      (ulong)be->pc, be->tcache_ptr, (ulong)be->next->pc, be->next->tcache_ptr);
     hash_collisions++;
   }
 #endif
@@ -1378,7 +1380,7 @@ static int rcache_is_u16(int hr)
   for (i = 0; i < ARRAY_SIZE(cache_regs); i++) { \
     cp = &cache_regs[i]; \
     if (cp->type != HR_FREE || cp->gregs || cp->locked || cp->flags) \
-      printf("  %d: hr=%d t=%d f=%x c=%d m=%x\n", i, cp->hreg, cp->type, cp->flags, cp->locked, cp->gregs); \
+      printf("  %d: hr=%d t=%d f=%x c=%d m=%lx\n", i, cp->hreg, cp->type, cp->flags, cp->locked, (ulong)cp->gregs); \
   } \
   printf(" guest_regs:\n"); \
   for (i = 0; i < ARRAY_SIZE(guest_regs); i++) { \
@@ -1389,7 +1391,7 @@ static int rcache_is_u16(int hr)
   printf(" gconsts:\n"); \
   for (i = 0; i < ARRAY_SIZE(gconsts); i++) { \
     if (gconsts[i].gregs) \
-      printf("  %d: m=%x v=%x\n", i, gconsts[i].gregs, gconsts[i].val); \
+      printf("  %d: m=%lx v=%lx\n", i, (ulong)gconsts[i].gregs, (ulong)gconsts[i].val); \
   } \
 }
 
@@ -2568,8 +2570,43 @@ static void rcache_init(void)
 
 // ---------------------------------------------------------------
 
+// swap 32 bit value read from mem in generated code (same as CPU_BE2)
+static void emit_le_swap(int cond, int r)
+{
+#if CPU_IS_LE
+  if (cond == -1)
+		emith_ror(r, r, 16);
+  else
+		emith_ror_c(cond, r, r, 16);
+#endif
+}
+
+// fix memory byte ptr in generated code (same as MEM_BE2)
+static void emit_le_ptr8(int cond, int r)
+{
+#if CPU_IS_LE
+  if (cond == -1)
+                emith_eor_r_imm_ptr(r, 1);
+  else
+                emith_eor_r_imm_ptr_c(cond, r, 1);
+#endif
+}
+
+// split address by mask, in base part (upper) and offset (lower, signed!)
+static uptr split_address(uptr la, uptr mask, s32 *offs)
+{
+  uptr sign = (mask>>1) + 1; // sign bit in offset
+  *offs = (la & mask) | (la & sign ? ~mask : 0); // offset part, sign extended
+  la = (la & ~mask) + ((la & sign) << 1); // base part, corrected for offs sign
+  if (~mask && la == ~mask && !(*offs & sign)) { // special case la=-1 & offs>0
+    *offs = -*offs;
+    la = 0;
+  }
+  return la;
+}
+
 // NB may return either REG or TEMP
-static int emit_get_rbase_and_offs(SH2 *sh2, sh2_reg_e r, int rmode, u32 *offs)
+static int emit_get_rbase_and_offs(SH2 *sh2, sh2_reg_e r, int rmode, s32 *offs)
 {
   uptr omask = emith_rw_offs_max(); // offset mask
   u32 mask = 0;
@@ -2592,14 +2629,14 @@ static int emit_get_rbase_and_offs(SH2 *sh2, sh2_reg_e r, int rmode, u32 *offs)
     a = (a + *offs) & mask;
     if (poffs == offsetof(SH2, p_da)) {
       // access sh2->data_array directly
-      a += offsetof(SH2, data_array);
-      emith_add_r_r_ptr_imm(hr, CONTEXT_REG, a & ~omask);
+      a = split_address(a + offsetof(SH2, data_array), omask, offs);
+      emith_add_r_r_ptr_imm(hr, CONTEXT_REG, a);
     } else {
+      a = split_address(a, omask, offs);
       emith_ctx_read_ptr(hr, poffs);
-      if (a & ~omask)
-        emith_add_r_r_ptr_imm(hr, hr, a & ~omask);
+      if (a)
+        emith_add_r_r_ptr_imm(hr, hr, a);
     }
-    *offs = a & omask;
     return hr;
   }
 
@@ -2608,29 +2645,30 @@ static int emit_get_rbase_and_offs(SH2 *sh2, sh2_reg_e r, int rmode, u32 *offs)
 
   // if r is in rcache or needed soon anyway, and offs is relative to region,
   // and address translation fits in add_ptr_imm (s32), then use rcached const 
-  if (la == (s32)la && !(*offs & ~mask) && rcache_is_cached(r)) {
-    u32 odd = a & 1; // need to fix odd address for correct byte addressing
-    la -= (s32)((a & ~mask) - *offs - odd); // diff between reg and memory
+  if (la == (s32)la && !(((a & mask) + *offs) & ~mask) && rcache_is_cached(r)) {
+#if CPU_IS_LE // need to fix odd address for correct byte addressing
+    if (a & 1) *offs += (*offs&1) ? 2 : -2;
+#endif
+    la -= (s32)((a & ~mask) - *offs); // diff between reg and memory
     hr = hr2 = rcache_get_reg(r, rmode, NULL);
     if ((s32)a < 0) emith_uext_ptr(hr2);
-    if ((la & ~omask) - odd) {
+    la = split_address(la, omask, offs);
+    if (la) {
       hr = rcache_get_tmp();
-      emith_add_r_r_ptr_imm(hr, hr2, (la & ~omask) - odd);
+      emith_add_r_r_ptr_imm(hr, hr2, la);
       rcache_free(hr2);
     }
-    *offs = (la & omask);
   } else {
     // known fixed host address
-    la += (a + *offs) & mask;
+    la = split_address(la + ((a + *offs) & mask), omask, offs);
     hr = rcache_get_tmp();
-    emith_move_r_ptr_imm(hr, la & ~omask);
-    *offs = la & omask;
+    emith_move_r_ptr_imm(hr, la);
   }
   return hr;
 }
 
 // read const data from const ROM address
-static int emit_get_rom_data(SH2 *sh2, sh2_reg_e r, u32 offs, int size, u32 *val)
+static int emit_get_rom_data(SH2 *sh2, sh2_reg_e r, s32 offs, int size, u32 *val)
 {
   u32 a, mask;
 
@@ -2764,7 +2802,7 @@ static void emit_memhandler_write(int size)
 }
 
 // rd = @(Rs,#offs); rd < 0 -> return a temp
-static int emit_memhandler_read_rr(SH2 *sh2, sh2_reg_e rd, sh2_reg_e rs, u32 offs, int size)
+static int emit_memhandler_read_rr(SH2 *sh2, sh2_reg_e rd, sh2_reg_e rs, s32 offs, int size)
 {
   int hr, hr2;
   u32 val;
@@ -2792,9 +2830,9 @@ static int emit_memhandler_read_rr(SH2 *sh2, sh2_reg_e rd, sh2_reg_e rs, u32 off
     else
       hr2 = rcache_get_reg(rd, RC_GR_WRITE, NULL);
     switch (size & MF_SIZEMASK) {
-    case 0: emith_read8s_r_r_offs(hr2, hr, offs ^ 1);  break; // 8
-    case 1: emith_read16s_r_r_offs(hr2, hr, offs);     break; // 16
-    case 2: emith_read_r_r_offs(hr2, hr, offs); emith_ror(hr2, hr2, 16); break;
+    case 0: emith_read8s_r_r_offs(hr2, hr, MEM_BE2(offs));  break; // 8
+    case 1: emith_read16s_r_r_offs(hr2, hr, offs);          break; // 16
+    case 2: emith_read_r_r_offs(hr2, hr, offs); emit_le_swap(-1, hr2); break;
     }
     rcache_free(hr);
     if (size & MF_POSTINCR)
@@ -2835,7 +2873,7 @@ static int emit_memhandler_read_rr(SH2 *sh2, sh2_reg_e rd, sh2_reg_e rs, u32 off
 }
 
 // @(Rs,#offs) = rd; rd < 0 -> write arg1
-static void emit_memhandler_write_rr(SH2 *sh2, sh2_reg_e rd, sh2_reg_e rs, u32 offs, int size)
+static void emit_memhandler_write_rr(SH2 *sh2, sh2_reg_e rd, sh2_reg_e rs, s32 offs, int size)
 {
   int hr, hr2;
   u32 val;
@@ -3587,7 +3625,7 @@ static void REGPARM(2) *sh2_translate(SH2 *sh2, int tcache_id)
       else                                              tmp3 = '*';
     } else if (drcf.loop_type)                          tmp3 = '.';
     else                                                tmp3 = ' ';
-    printf("%c%08x %04x %s\n", tmp3, pc, op, sh2dasm_buff);
+    printf("%c%08lx %04x %s\n", tmp3, (ulong)pc, op, sh2dasm_buff);
 #endif
 
     pc += 2;
@@ -5072,7 +5110,7 @@ end_op:
   else
     opd = &ops[i-1];
 
-  if (! OP_ISBRAUC(opd->op))
+  if (! OP_ISBRAUC(opd->op) || (opd->dest & BITMASK1(SHR_PR)))
   {
     tmp = rcache_get_reg(SHR_SR, RC_GR_RMW, NULL);
     FLUSH_CYCLES(tmp);
@@ -5174,7 +5212,7 @@ static void sh2_generate_utils(void)
   emith_sh2_rcall(arg0, arg1, arg2, arg3);
   EMITH_SJMP_START(DCOND_CS);
   emith_and_r_r_c(DCOND_CC, arg0, arg3);
-  emith_eor_r_imm_ptr_c(DCOND_CC, arg0, 1);
+  emit_le_ptr8(DCOND_CC, arg0);
   emith_read8s_r_r_r_c(DCOND_CC, RET_REG, arg2, arg0);
   emith_ret_c(DCOND_CC);
   EMITH_SJMP_END(DCOND_CS);
@@ -5204,7 +5242,7 @@ static void sh2_generate_utils(void)
   EMITH_SJMP_START(DCOND_CS);
   emith_and_r_r_c(DCOND_CC, arg0, arg3);
   emith_read_r_r_r_c(DCOND_CC, RET_REG, arg2, arg0);
-  emith_ror_c(DCOND_CC, RET_REG, RET_REG, 16);
+  emit_le_swap(DCOND_CC, RET_REG);
   emith_ret_c(DCOND_CC);
   EMITH_SJMP_END(DCOND_CS);
   emith_move_r_r_ptr(arg1, CONTEXT_REG);
@@ -5221,7 +5259,7 @@ static void sh2_generate_utils(void)
   emith_abijump_reg_c(DCOND_CS, arg2);
   EMITH_SJMP_END(DCOND_CC);
   emith_and_r_r_r(arg1, arg0, arg3);
-  emith_eor_r_imm_ptr(arg1, 1);
+  emit_le_ptr8(-1, arg1);
   emith_read8s_r_r_r(arg1, arg2, arg1);
   emith_push_ret(arg1);
   emith_move_r_r_ptr(arg2, CONTEXT_REG);
@@ -5257,7 +5295,7 @@ static void sh2_generate_utils(void)
   EMITH_SJMP_END(DCOND_CC);
   emith_and_r_r_r(arg1, arg0, arg3);
   emith_read_r_r_r(arg1, arg2, arg1);
-  emith_ror(arg1, arg1, 16);
+  emit_le_swap(-1, arg1);
   emith_push_ret(arg1);
   emith_move_r_r_ptr(arg2, CONTEXT_REG);
   emith_abicall(p32x_sh2_poll_memory32);
@@ -5641,7 +5679,7 @@ static void block_stats(void)
     }
     if (maxb == NULL)
       break;
-    printf("%08x %p %9d %2.3f%%\n", maxb->addr, maxb->tcache_ptr, maxb->refcount,
+    printf("%08lx %p %9d %2.3f%%\n", (ulong)maxb->addr, maxb->tcache_ptr, maxb->refcount,
       (double)maxb->refcount / total * 100.0);
     maxb->refcount = 0;
   }
@@ -5682,7 +5720,7 @@ void entry_stats(void)
     }
     if (maxb == NULL)
       break;
-    printf("%08x %p %9d %2.3f%%\n", maxb->pc, maxb->tcache_ptr, maxb->entry_count,
+    printf("%08lx %p %9d %2.3f%%\n", (ulong)maxb->pc, maxb->tcache_ptr, maxb->entry_count,
       (double)100 * maxb->entry_count / total);
     maxb->entry_count = 0;
   }
@@ -5714,25 +5752,25 @@ static void state_dump(void)
   int i;
 
   SH2_DUMP(&sh2s[0], "master");
-  printf("VBR msh2: %x\n", sh2s[0].vbr);
+  printf("VBR msh2: %lx\n", (ulong)sh2s[0].vbr);
   for (i = 0; i < 0x60; i++) {
-    printf("%08x ",p32x_sh2_read32(sh2s[0].vbr + i*4, &sh2s[0]));
+    printf("%08lx ",(ulong)p32x_sh2_read32(sh2s[0].vbr + i*4, &sh2s[0]));
     if ((i+1) % 8 == 0) printf("\n");
   }
-  printf("stack msh2: %x\n", sh2s[0].r[15]);
+  printf("stack msh2: %lx\n", (ulong)sh2s[0].r[15]);
   for (i = -0x30; i < 0x30; i++) {
-    printf("%08x ",p32x_sh2_read32(sh2s[0].r[15] + i*4, &sh2s[0]));
+    printf("%08lx ",(ulong)p32x_sh2_read32(sh2s[0].r[15] + i*4, &sh2s[0]));
     if ((i+1) % 8 == 0) printf("\n");
   }
   SH2_DUMP(&sh2s[1], "slave");
-  printf("VBR ssh2: %x\n", sh2s[1].vbr);
+  printf("VBR ssh2: %lx\n", (ulong)sh2s[1].vbr);
   for (i = 0; i < 0x60; i++) {
-    printf("%08x ",p32x_sh2_read32(sh2s[1].vbr + i*4, &sh2s[1]));
+    printf("%08lx ",(ulong)p32x_sh2_read32(sh2s[1].vbr + i*4, &sh2s[1]));
     if ((i+1) % 8 == 0) printf("\n");
   }
-  printf("stack ssh2: %x\n", sh2s[1].r[15]);
+  printf("stack ssh2: %lx\n", (ulong)sh2s[1].r[15]);
   for (i = -0x30; i < 0x30; i++) {
-    printf("%08x ",p32x_sh2_read32(sh2s[1].r[15] + i*4, &sh2s[1]));
+    printf("%08lx ",(ulong)p32x_sh2_read32(sh2s[1].r[15] + i*4, &sh2s[1]));
     if ((i+1) % 8 == 0) printf("\n");
   }
 #endif
@@ -5748,11 +5786,11 @@ static void bcache_stats(void)
 
   printf("return cache hits:%d misses:%d depth: %d index: %d/%d\n", rchit, rcmiss, i,sh2s[0].rts_cache_idx,sh2s[1].rts_cache_idx);
   for (i = 0; i < ARRAY_SIZE(sh2s[0].rts_cache); i++) {
-    printf("%08x ",sh2s[0].rts_cache[i].pc);
+    printf("%08lx ",(ulong)sh2s[0].rts_cache[i].pc);
     if ((i+1) % 8 == 0) printf("\n");
   }
   for (i = 0; i < ARRAY_SIZE(sh2s[1].rts_cache); i++) {
-    printf("%08x ",sh2s[1].rts_cache[i].pc);
+    printf("%08lx ",(ulong)sh2s[1].rts_cache[i].pc);
     if ((i+1) % 8 == 0) printf("\n");
   }
 #endif
@@ -5760,12 +5798,12 @@ static void bcache_stats(void)
   printf("branch cache hits:%d misses:%d\n", bchit, bcmiss);
   printf("branch cache master:\n");
   for (i = 0; i < ARRAY_SIZE(sh2s[0].branch_cache); i++) {
-    printf("%08x ",sh2s[0].branch_cache[i].pc);
+    printf("%08lx ",(ulong)sh2s[0].branch_cache[i].pc);
     if ((i+1) % 8 == 0) printf("\n");
   }
   printf("branch cache slave:\n");
   for (i = 0; i < ARRAY_SIZE(sh2s[1].branch_cache); i++) {
-    printf("%08x ",sh2s[1].branch_cache[i].pc);
+    printf("%08lx ",(ulong)sh2s[1].branch_cache[i].pc);
     if ((i+1) % 8 == 0) printf("\n");
   }
 #endif

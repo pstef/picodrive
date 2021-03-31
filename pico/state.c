@@ -9,7 +9,7 @@
 #include "pico_int.h"
 #include <zlib.h>
 
-#include "../cpu/sh2/sh2.h"
+#include <cpu/sh2/sh2.h>
 #include "sound/ym2612.h"
 #include "sound/emu2413/emu2413.h"
 #include "state.h"
@@ -205,7 +205,8 @@ static int write_chunk(chunk_name_e name, int len, void *data, void *file)
 
 #define CHECKED_WRITE(name,len,data) { \
   if (PicoStateProgressCB && name < CHUNK_DEFAULT_COUNT && chunk_names[name]) { \
-    strncpy(sbuff + 9, chunk_names[name], sizeof(sbuff) - 9); \
+    strncpy(sbuff + 9, chunk_names[name], sizeof(sbuff)-1 - 9); \
+    sbuff[sizeof(sbuff)-1] = '\0'; \
     PicoStateProgressCB(sbuff); \
   } \
   if (data == buf2 && len > CHUNK_LIMIT_W) \
@@ -216,7 +217,8 @@ static int write_chunk(chunk_name_e name, int len, void *data, void *file)
 
 #define CHECKED_WRITE_BUFF(name,buff) { \
   if (PicoStateProgressCB && name < CHUNK_DEFAULT_COUNT && chunk_names[name]) { \
-    strncpy(sbuff + 9, chunk_names[name], sizeof(sbuff) - 9); \
+    strncpy(sbuff + 9, chunk_names[name], sizeof(sbuff)-1 - 9); \
+    sbuff[sizeof(sbuff)-1] = '\0'; \
     PicoStateProgressCB(sbuff); \
   } \
   if (!write_chunk(name, sizeof(buff), &buff, file)) \

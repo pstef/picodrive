@@ -123,7 +123,7 @@ static void draw_sprites(int scanline)
   for (i = s = 0; i < 64; i++)
   {
     int y;
-    y = sat[i] + 1;
+    y = sat[MEM_LE2(i)] + 1;
     if (y == 0xd1)
       break;
     if (y + h <= scanline || scanline < y)
@@ -133,8 +133,8 @@ static void draw_sprites(int scanline)
       break;
     }
 
-    sprites_x[s] = xoff + sat[0x80 + i*2];
-    sprites_addr[s] = sprite_base + ((sat[0x80 + i*2 + 1] & addr_mask) << (5-1)) +
+    sprites_x[s] = xoff + sat[MEM_LE2(0x80 + i*2)];
+    sprites_addr[s] = sprite_base + ((sat[MEM_LE2(0x80 + i*2 + 1)] & addr_mask) << (5-1)) +
       ((scanline - y) << (2-1));
     s++;
   }
@@ -145,7 +145,7 @@ static void draw_sprites(int scanline)
 
   // now draw all sprites backwards
   for (--s; s >= 0; s--) {
-    pack = *(unsigned int *)(PicoMem.vram + sprites_addr[s]);
+    pack = CPU_LE2(*(u32 *)(PicoMem.vram + sprites_addr[s]));
     TileNormM4(sprites_x[s], pack, 0x10);
   }
 }
@@ -161,7 +161,7 @@ static void draw_strip_low(const unsigned short *nametab, int dx, int cells, int
   for (; cells > 0; dx += 8, tilex_ty_prio++, cells--)
   {
     unsigned int pack;
-    int code;
+    unsigned code;
 
     code = nametab[tilex_ty_prio & 0x1f];
 
@@ -176,7 +176,7 @@ static void draw_strip_low(const unsigned short *nametab, int dx, int cells, int
       pal = (code>>7) & 0x10;
     }
 
-    pack = *(unsigned int *)(PicoMem.vram + addr); /* Get 4 bitplanes / 8 pixels */
+    pack = CPU_LE2(*(u32 *)(PicoMem.vram + addr)); /* Get 4 bitplanes / 8 pixels */
     if (pack == 0)          TileBGM4(dx, pal);
     else if (code & 0x0200) TileFlipM4Low(dx, pack, pal);
     else                    TileNormM4Low(dx, pack, pal);
@@ -192,7 +192,7 @@ static void draw_strip_high(const unsigned short *nametab, int dx, int cells, in
   for (; cells > 0; dx += 8, tilex_ty_prio++, cells--)
   {
     unsigned int pack;
-    int code;
+    unsigned code;
 
     code = nametab[tilex_ty_prio & 0x1f];
     if (code == blank)
@@ -211,7 +211,7 @@ static void draw_strip_high(const unsigned short *nametab, int dx, int cells, in
       pal = (code>>7) & 0x10;
     }
 
-    pack = *(unsigned int *)(PicoMem.vram + addr); /* Get 4 bitplanes / 8 pixels */
+    pack = CPU_LE2(*(u32 *)(PicoMem.vram + addr)); /* Get 4 bitplanes / 8 pixels */
     if (pack == 0) {
       blank = code;
       continue;
@@ -337,9 +337,12 @@ void PicoDoHighPal555M4(void)
   /* cram is always stored as shorts, even though real hardware probably uses bytes */
   for (i = 0x20/2; i > 0; i--, spal++, dpal++) {
     t = *spal;
-#ifdef USE_BGR555
+#if defined(USE_BGR555)
     t = ((t & 0x00030003)<< 3) | ((t & 0x000c000c)<<6) | ((t & 0x00300030)<<9);
     t |= (t >> 2) | ((t >> 4) & 0x04210421);
+#elif defined(USE_BGR565)
+    t = ((t & 0x00030003)<< 3) | ((t & 0x000c000c)<<7) | ((t & 0x00300030)<<10);
+    t |= (t >> 2) | ((t >> 4) & 0x08610861);
 #else
     t = ((t & 0x00030003)<<14) | ((t & 0x000c000c)<<7) | ((t & 0x00300030)>>1);
     t |= (t >> 2) | ((t >> 4) & 0x08610861);
@@ -363,7 +366,7 @@ static void FinalizeLine8bitM4(int line)
 {
   unsigned char *pd = Pico.est.DrawLineDest;
 
-  if (HighColBase != DrawLineDestBase)
+  if (DrawLineDestIncrement)
     memcpy(pd + line_offset, Pico.est.HighCol + line_offset + 8, 256);
 }
 

@@ -383,9 +383,12 @@ enum { xAX = 0, xCX, xDX, xBX, xSP, xBP, xSI, xDI,	// x86-64,i386 common
 
 // _r_imm
 #define emith_move_r_imm(r, imm) do { \
-	EMIT_REX_IF(0, 0, r); \
-	EMIT_OP(0xb8 + ((r)&7)); \
-	EMIT(imm, u32); \
+	if (imm) { \
+		EMIT_REX_IF(0, 0, r); \
+		EMIT_OP(0xb8 + ((r)&7)); \
+		EMIT(imm, u32); \
+	} else \
+		emith_eor_r_r(r, r); \
 } while (0)
 
 #define emith_move_r_ptr_imm(r, imm) do { \
@@ -1033,8 +1036,7 @@ enum { xAX = 0, xCX, xDX, xBX, xSP, xBP, xSI, xDI,	// x86-64,i386 common
 #define host_instructions_updated(base, end, force)	(void)(base),(void)(end)
 #define	emith_update_cache()	/**/
 
-// NB this MUST be <0x40000000 to avoid overflow in address calculations
-#define emith_rw_offs_max()	0xfffffff // for better perfomance: <0x10000000
+#define emith_rw_offs_max()	0xffffffffU
 
 #ifdef __x86_64__
 

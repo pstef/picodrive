@@ -103,7 +103,7 @@ get_define () # prefix struct member member...
 	field=$(echo $* | sed 's/ /./g')
 	name=$(echo $* | sed 's/ /_/g')
 	echo '#include <stdint.h>' > /tmp/getoffs.c
-	echo '#include "pico/pico_int.h"' >> /tmp/getoffs.c
+	echo '#include <pico/pico_int.h>' >> /tmp/getoffs.c
 	echo "static struct $struct p;" >> /tmp/getoffs.c
 	echo "const int32_t val = (char *)&p.$field - (char*)&p;" >>/tmp/getoffs.c
 	compile_rodata
@@ -144,6 +144,8 @@ get_define OFS_EST_ PicoEState PicoMem_vram	; echo "$line" >>$fn
 get_define OFS_EST_ PicoEState PicoMem_cram	; echo "$line" >>$fn
 get_define OFS_EST_ PicoEState PicoOpt		; echo "$line" >>$fn
 get_define OFS_EST_ PicoEState Draw2FB		; echo "$line" >>$fn
+get_define OFS_EST_ PicoEState Draw2Width	; echo "$line" >>$fn
+get_define OFS_EST_ PicoEState Draw2Start	; echo "$line" >>$fn
 get_define OFS_EST_ PicoEState HighPal		; echo "$line" >>$fn
 
 get_define OFS_PMEM_ PicoMem vram		; echo "$line" >>$fn

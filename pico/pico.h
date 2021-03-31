@@ -57,7 +57,7 @@ extern void *p32x_bios_g, *p32x_bios_m, *p32x_bios_s;
 #define POPT_EN_STEREO      (1<< 3)
 #define POPT_ALT_RENDERER   (1<< 4) // 00 00x0
 #define POPT_EN_YM2413      (1<< 5)
-// unused                   (1<< 6)
+#define POPT_EN_SNDFILTER   (1<< 6)
 #define POPT_ACC_SPRITES    (1<< 7)
 #define POPT_DIS_32C_BORDER (1<< 8) // 00 0x00
 #define POPT_EXT_FM         (1<< 9)
@@ -102,8 +102,7 @@ typedef struct
 	unsigned short overclockM68k;  // overclock the emulated 68k, in %
 
 	int sndRate;                   // rate in Hz
-	unsigned short sndFilter;      // Set low pass sound filter 0: off, 1: on (use integer in case we want to add other filter types later)
-	int32_t sndFilterRange;        // Low pass sound filter range [0, 65536]
+	int sndFilterAlpha;            // Low pass sound filter alpha (Q16)
 	short *sndOut;                 // PCM output buffer
 	void (*writeSound)(int len);   // write .sndOut callback, called once per frame
 
@@ -161,7 +160,8 @@ typedef enum
 {
 	PMT_UNCOMPRESSED = 0,
 	PMT_ZIP,
-	PMT_CSO
+	PMT_CSO,
+	PMT_CHD
 } pm_type;
 typedef struct
 {
@@ -172,7 +172,9 @@ typedef struct
 	char ext[4];
 } pm_file;
 pm_file *pm_open(const char *path);
+void     pm_sectorsize(int length, pm_file *stream);
 size_t   pm_read(void *ptr, size_t bytes, pm_file *stream);
+size_t   pm_read_audio(void *ptr, size_t bytes, pm_file *stream);
 int      pm_seek(pm_file *stream, long offset, int whence);
 int      pm_close(pm_file *fp);
 int PicoCartLoad(pm_file *f,unsigned char **prom,unsigned int *psize,int is_sms);
@@ -208,9 +210,10 @@ void PicoDoHighPal555(int sh, int line, struct PicoEState *est);
 #define PDRAW_SONIC_MODE    (1<<5) // mid-frame palette changes for 8bit renderer
 #define PDRAW_PLANE_HI_PRIO (1<<6) // have layer with all hi prio tiles (mk3)
 #define PDRAW_SHHI_DONE     (1<<7) // layer sh/hi already processed
-#define PDRAW_32_COLS       (1<<8) // 32 column mode
+#define PDRAW_32_COLS       (1<<8) // 32 columns mode
 #define PDRAW_BORDER_32     (1<<9) // center H32 in buffer (32 px border)
 #define PDRAW_SKIP_FRAME   (1<<10) // frame is skipped
+#define PDRAW_30_ROWS      (1<<11) // 30 rows mode (240 lines)
 extern int rendstatus_old;
 extern int rendlines;
 
@@ -254,13 +257,33 @@ enum media_type_e {
   PM_CD,
 };
 
-enum cd_img_type
+enum cd_track_type
 {
-  CIT_NOT_CD = 0,
-  CIT_ISO,
-  CIT_BIN,
-  CIT_CUE
+  CT_UNKNOWN = 0,
+  // data tracks
+  CT_ISO = 1,	/* 2048 B/sector */
+  CT_BIN = 2,	/* 2352 B/sector */
+  // audio tracks
+  CT_MP3 = 3,
+  CT_WAV = 4,
+  CT_CHD = 5,
 };
+
+typedef struct
+{
+	char *fname;
+	int pregap;		/* pregap for current track */
+	int sector_offset;	/* in current file */
+	int sector_xlength;
+	enum cd_track_type type;
+} cd_track_t;
+
+typedef struct
+{
+	int track_count;
+	cd_track_t tracks[0];
+} cd_data_t;
+
 
 enum media_type_e PicoLoadMedia(const char *filename,
   const char *carthw_cfg_fname,

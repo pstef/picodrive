@@ -19,7 +19,7 @@
 #include "plat_sdl.h"
 #include "version.h"
 
-#include <pico/pico.h>
+#include <pico/pico_int.h>
 
 static void *shadow_fb;
 
@@ -33,7 +33,7 @@ static struct in_pdata in_sdl_platform_data = {
 static int yuv_ry[32], yuv_gy[32], yuv_by[32];
 static unsigned char yuv_u[32 * 2], yuv_v[32 * 2];
 static unsigned char yuv_y[256];
-static struct uyvy {  unsigned int y:8; unsigned int vyu:24; } yuv_uyvy[65536];
+static struct uyvy { uint32_t y:8; uint32_t vyu:24; } yuv_uyvy[65536];
 
 void bgr_to_uyvy_init(void)
 {
@@ -73,7 +73,11 @@ void bgr_to_uyvy_init(void)
      int r = (i >> 11) & 0x1f, g = (i >> 6) & 0x1f, b = (i >> 0) & 0x1f;
      int y = (yuv_ry[r] + yuv_gy[g] + yuv_by[b]) >> 16;
      yuv_uyvy[i].y = yuv_y[y];
+#if CPU_IS_LE
      yuv_uyvy[i].vyu = (yuv_v[r-y + 32] << 16) | (yuv_y[y] << 8) | yuv_u[b-y + 32];
+#else
+     yuv_uyvy[i].vyu = (yuv_v[b-y + 32] << 16) | (yuv_y[y] << 8) | yuv_u[r-y + 32];
+#endif
   }
 }
 
@@ -87,17 +91,29 @@ void rgb565_to_uyvy(void *d, const void *s, int pixels, int x2)
   {
     struct uyvy *uyvy0 = yuv_uyvy + src[0], *uyvy1 = yuv_uyvy + src[1];
     struct uyvy *uyvy2 = yuv_uyvy + src[2], *uyvy3 = yuv_uyvy + src[3];
+#if CPU_IS_LE
     dst[0] = (uyvy0->y << 24) | uyvy0->vyu;
     dst[1] = (uyvy1->y << 24) | uyvy1->vyu;
     dst[2] = (uyvy2->y << 24) | uyvy2->vyu;
     dst[3] = (uyvy3->y << 24) | uyvy3->vyu;
+#else
+    dst[0] = uyvy0->y | (uyvy0->vyu << 8);
+    dst[1] = uyvy1->y | (uyvy1->vyu << 8);
+    dst[2] = uyvy2->y | (uyvy2->vyu << 8);
+    dst[3] = uyvy3->y | (uyvy3->vyu << 8);
+#endif
   } else 
   for (; pixels > 0; src += 4, dst += 2, pixels -= 4)
   {
     struct uyvy *uyvy0 = yuv_uyvy + src[0], *uyvy1 = yuv_uyvy + src[1];
     struct uyvy *uyvy2 = yuv_uyvy + src[2], *uyvy3 = yuv_uyvy + src[3];
+#if CPU_IS_LE
     dst[0] = (uyvy1->y << 24) | uyvy0->vyu;
     dst[1] = (uyvy3->y << 24) | uyvy2->vyu;
+#else
+    dst[0] = uyvy1->y | (uyvy0->vyu << 8);
+    dst[1] = uyvy3->y | (uyvy2->vyu << 8);
+#endif
   }
 }
 
@@ -164,7 +180,7 @@ void plat_video_menu_enter(int is_rom_loaded)
 {
 	if (SDL_MUSTLOCK(plat_sdl_screen))
 		SDL_UnlockSurface(plat_sdl_screen);
-	plat_sdl_change_video_mode(g_menuscreen_w, g_menuscreen_h, 0);
+	plat_sdl_change_video_mode(g_menuscreen_w, g_menuscreen_h, 1);
 	g_screen_ptr = shadow_fb;
 	plat_video_set_buffer(g_screen_ptr);
 }
@@ -211,12 +227,20 @@ void plat_video_menu_leave(void)
 
 void plat_video_loop_prepare(void)
 {
-	plat_sdl_change_video_mode(g_screen_width, g_screen_height, 0);
-
+	// take over any new vout settings XXX ask plat_sdl for scaling instead!
+	plat_sdl_change_video_mode(g_menuscreen_w, g_menuscreen_h, 0);
+	// switch over to scaled output if available
 	if (plat_sdl_overlay != NULL || plat_sdl_gl_active) {
+		g_screen_width = 320;
+		g_screen_height = 240;
+		g_screen_ppitch = g_screen_width;
+		plat_sdl_change_video_mode(g_screen_width, g_screen_height, 0);
 		g_screen_ptr = shadow_fb;
 	}
 	else {
+		g_screen_width = g_menuscreen_w;
+		g_screen_height = g_menuscreen_h;
+		g_screen_ppitch = g_menuscreen_pp;
 		if (SDL_MUSTLOCK(plat_sdl_screen))
 			SDL_LockSurface(plat_sdl_screen);
 		g_screen_ptr = plat_sdl_screen->pixels;
@@ -243,7 +267,7 @@ void plat_init(void)
 	if (ret != 0)
 		exit(1);
 	SDL_ShowCursor(0);
-#if defined(__RG350__) || defined(__GCW0__)
+#if defined(__RG350__) || defined(__GCW0__) || defined(__OPENDINGUX__)
 	// opendingux on JZ47x0 may falsely report a HW overlay, fix to window
 	plat_target.vout_method = 0;
 #endif

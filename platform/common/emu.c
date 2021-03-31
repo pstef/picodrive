@@ -539,11 +539,11 @@ out:
 
 int emu_swap_cd(const char *fname)
 {
-	enum cd_img_type cd_type;
+	enum cd_track_type cd_type;
 	int ret = -1;
 
 	cd_type = PicoCdCheck(fname, NULL);
-	if (cd_type != CIT_NOT_CD)
+	if (cd_type != CT_UNKNOWN)
 		ret = cdd_load(fname, cd_type);
 	if (ret != 0) {
 		menu_update_msg("Load failed, invalid CD image?");
@@ -585,8 +585,10 @@ static void make_config_cfg(char *cfg_buff_512)
 void emu_prep_defconfig(void)
 {
 	memset(&defaultConfig, 0, sizeof(defaultConfig));
-	defaultConfig.EmuOpt    = 0x9d | EOPT_EN_CD_LEDS;
-	defaultConfig.s_PicoOpt = POPT_EN_STEREO|POPT_EN_FM|POPT_EN_PSG|POPT_EN_Z80 |
+	defaultConfig.EmuOpt    = EOPT_EN_SRAM | EOPT_EN_SOUND | EOPT_16BPP |
+				  EOPT_EN_CD_LEDS | EOPT_GZIP_SAVES | 0x10/*?*/;
+	defaultConfig.s_PicoOpt = POPT_EN_SNDFILTER|
+				  POPT_EN_STEREO|POPT_EN_FM|POPT_EN_PSG|POPT_EN_Z80 |
 				  POPT_EN_MCD_PCM|POPT_EN_MCD_CDDA|POPT_EN_MCD_GFX |
 				  POPT_EN_DRC|POPT_ACC_SPRITES |
 				  POPT_EN_32X|POPT_EN_PWM;
@@ -594,6 +596,7 @@ void emu_prep_defconfig(void)
 	defaultConfig.s_PicoRegion = 0; // auto
 	defaultConfig.s_PicoAutoRgnOrder = 0x184; // US, EU, JP
 	defaultConfig.s_PicoCDBuffers = 0;
+	defaultConfig.s_PicoSndFilterAlpha = 0x10000 * 60 / 100;
 	defaultConfig.confirm_save = EOPT_CONFIRM_SAVE;
 	defaultConfig.Frameskip = -1; // auto
 	defaultConfig.input_dev0 = PICO_INPUT_PAD_3BTN;
@@ -617,6 +620,7 @@ void emu_set_defconfig(void)
 	PicoIn.sndRate = currentConfig.s_PsndRate;
 	PicoIn.regionOverride = currentConfig.s_PicoRegion;
 	PicoIn.autoRgnOrder = currentConfig.s_PicoAutoRgnOrder;
+	PicoIn.sndFilterAlpha = currentConfig.s_PicoSndFilterAlpha;
 }
 
 int emu_read_config(const char *rom_fname, int no_defaults)
@@ -665,12 +669,6 @@ int emu_read_config(const char *rom_fname, int no_defaults)
 	PicoIn.overclockM68k = currentConfig.overclock_68k;
 
 	// some sanity checks
-#ifdef PSP
-	/* TODO: mv to plat_validate_config() */
-	if (currentConfig.CPUclock < 10 || currentConfig.CPUclock > 4096) currentConfig.CPUclock = 200;
-	if (currentConfig.gamma < -4 || currentConfig.gamma >  16) currentConfig.gamma = 0;
-	if (currentConfig.gamma2 < 0 || currentConfig.gamma2 > 2)  currentConfig.gamma2 = 0;
-#endif
 	if (currentConfig.volume < 0 || currentConfig.volume > 99)
 		currentConfig.volume = 50;
 
@@ -974,7 +972,7 @@ void emu_set_fastforward(int set_on)
 		PicoIn.sndOut = NULL;
 		currentConfig.Frameskip = 8;
 		currentConfig.EmuOpt &= ~4;
-		currentConfig.EmuOpt |= 0x40000;
+		currentConfig.EmuOpt |= EOPT_NO_FRMLIMIT;
 		is_on = 1;
 		emu_status_msg("FAST FORWARD");
 	}
@@ -1212,7 +1210,7 @@ static void mkdir_path(char *path_with_reserve, int pos, const char *name)
 		lprintf("failed to create: %s\n", path_with_reserve);
 }
 
-void emu_cmn_forced_frame(int no_scale, int do_emu)
+void emu_cmn_forced_frame(int no_scale, int do_emu, void *buf)
 {
 	int po_old = PicoIn.opt;
 	int y;
@@ -1227,6 +1225,7 @@ void emu_cmn_forced_frame(int no_scale, int do_emu)
 		PicoIn.opt |= POPT_EN_SOFTSCALE;
 
 	PicoDrawSetOutFormat(PDF_RGB555, 1);
+	PicoDrawSetOutBuf(buf, g_screen_ppitch * 2);
 	Pico.m.dirtyPal = 1;
 	Pico.est.rendstatus |= PDRAW_DIRTY_SPRITES;
 	if (do_emu)

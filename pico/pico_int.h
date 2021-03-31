@@ -11,6 +11,7 @@
 #define PICO_INTERNAL_INCLUDED
 #include <stdio.h>
 #include <string.h>
+#include "pico_types.h"
 #include "pico_port.h"
 #include "pico.h"
 #include "carthw/carthw.h"
@@ -31,11 +32,9 @@
 extern "C" {
 #endif
 
-#include "pico_types.h"
-
 // ----------------------- 68000 CPU -----------------------
 #ifdef EMU_C68K
-#include "../cpu/cyclone/Cyclone.h"
+#include <cpu/cyclone/Cyclone.h>
 extern struct Cyclone PicoCpuCM68k, PicoCpuCS68k;
 #define SekCyclesLeft     PicoCpuCM68k.cycles // cycles left for this run
 #define SekCyclesLeftS68k PicoCpuCS68k.cycles
@@ -60,7 +59,7 @@ extern struct Cyclone PicoCpuCM68k, PicoCpuCS68k;
 #endif
 
 #ifdef EMU_F68K
-#include "../cpu/fame/fame.h"
+#include <cpu/fame/fame.h>
 extern M68K_CONTEXT PicoCpuFM68k, PicoCpuFS68k;
 #define SekCyclesLeft     PicoCpuFM68k.io_cycle_counter
 #define SekCyclesLeftS68k PicoCpuFS68k.io_cycle_counter
@@ -91,7 +90,7 @@ extern M68K_CONTEXT PicoCpuFM68k, PicoCpuFS68k;
 #endif
 
 #ifdef EMU_M68K
-#include "../cpu/musashi/m68kcpu.h"
+#include <cpu/musashi/m68kcpu.h>
 extern m68ki_cpu_core PicoCpuMM68k, PicoCpuMS68k;
 #ifndef SekCyclesLeft
 #define SekCyclesLeft     PicoCpuMM68k.cyc_remaining_cycles
@@ -160,7 +159,7 @@ extern unsigned int SekCycleAimS68k;
 // ----------------------- Z80 CPU -----------------------
 
 #if defined(_USE_DRZ80)
-#include "../cpu/DrZ80/drz80.h"
+#include <cpu/DrZ80/drz80.h>
 
 extern struct DrZ80 drZ80;
 
@@ -175,7 +174,7 @@ extern struct DrZ80 drZ80;
 #define z80_pc()           (drZ80.Z80PC - drZ80.Z80PC_BASE)
 
 #elif defined(_USE_CZ80)
-#include "../cpu/cz80/cz80.h"
+#include <cpu/cz80/cz80.h>
 
 #define z80_run(cycles)    Cz80_Exec(&CZ80, cycles)
 #define z80_run_nr(cycles) Cz80_Exec(&CZ80, cycles)
@@ -209,7 +208,7 @@ extern struct DrZ80 drZ80;
 
 // ----------------------- SH2 CPU -----------------------
 
-#include "cpu/sh2/sh2.h"
+#include <cpu/sh2/sh2.h>
 
 extern SH2 sh2s[2];
 #define msh2 sh2s[0]
@@ -244,10 +243,10 @@ extern SH2 sh2s[2];
 #define sh2_cycles_done_m68k(sh2) \
   (unsigned)((sh2)->m68krcycles_done + C_SH2_TO_M68K(sh2, sh2_cycles_done(sh2)))
 
-#define sh2_reg(c, x) (c) ? ssh2.r[x] : msh2.r[x]
-#define sh2_gbr(c)    (c) ? ssh2.gbr : msh2.gbr
-#define sh2_vbr(c)    (c) ? ssh2.vbr : msh2.vbr
-#define sh2_sr(c)   (((c) ? ssh2.sr : msh2.sr) & 0xfff)
+#define sh2_reg(c, x) ((c) ? ssh2.r[x] : msh2.r[x])
+#define sh2_gbr(c)    ((c) ? ssh2.gbr : msh2.gbr)
+#define sh2_vbr(c)    ((c) ? ssh2.vbr : msh2.vbr)
+#define sh2_sr(c)    (((c) ? ssh2.sr : msh2.sr) & 0xfff)
 
 #define sh2_set_gbr(c, v) \
   { if (c) ssh2.gbr = v; else msh2.gbr = v; }
@@ -354,12 +353,14 @@ struct PicoEState
   int rendstatus;
   void *DrawLineDest;          // draw destination
   unsigned char *HighCol;
-  int *HighPreSpr;
+  s32 *HighPreSpr;
   struct Pico *Pico;
-  void *PicoMem_vram;
-  void *PicoMem_cram;
+  unsigned short *PicoMem_vram;
+  unsigned short *PicoMem_cram;
   unsigned int  *PicoOpt;
   unsigned char *Draw2FB;
+  int Draw2Width;
+  int Draw2Start;
   unsigned short HighPal[0x100];
   unsigned short SonicPal[0x100];
   int SonicPalCount;
@@ -568,8 +569,8 @@ typedef struct
 #define P32XI_CMD  (1 <<  8/2)
 #define P32XI_PWM  (1 <<  6/2)
 
-// peripheral reg access
-#define PREG8(regs,offs) ((unsigned char *)regs)[offs ^ 3]
+// peripheral reg access (32 bit regs)
+#define PREG8(regs,offs) ((unsigned char *)regs)[MEM_BE4(offs)]
 
 #define DMAC_FIFO_LEN (4*2)
 #define PWM_BUFF_LEN 1024 // in one channel samples
@@ -671,10 +672,10 @@ extern unsigned char *HighColBase;
 extern int HighColIncrement;
 extern void *DrawLineDestBase;
 extern int DrawLineDestIncrement;
-extern unsigned int VdpSATCache[128];
+extern u32 VdpSATCache[128];
 
 // draw2.c
-void PicoDraw2SetOutBuf(void *dest);
+void PicoDraw2SetOutBuf(void *dest, int incr);
 void PicoDraw2Init(void);
 PICO_INTERNAL void PicoFrameFull();
 
@@ -686,10 +687,10 @@ void PicoDrawSetOutputMode4(pdso_t which);
 
 // memory.c
 PICO_INTERNAL void PicoMemSetup(void);
-unsigned int PicoRead8_io(unsigned int a);
-unsigned int PicoRead16_io(unsigned int a);
-void PicoWrite8_io(unsigned int a, unsigned int d);
-void PicoWrite16_io(unsigned int a, unsigned int d);
+u32 PicoRead8_io(u32 a);
+u32 PicoRead16_io(u32 a);
+void PicoWrite8_io(u32 a, u32 d);
+void PicoWrite16_io(u32 a, u32 d);
 
 // pico/memory.c
 PICO_INTERNAL void PicoMemSetupPico(void);
@@ -721,20 +722,20 @@ int load_cd_image(const char *cd_img_name, int *type);
 
 // cd/gfx.c
 void gfx_init(void);
-void gfx_start(unsigned int base);
+void gfx_start(u32 base);
 void gfx_update(unsigned int cycles);
 int gfx_context_save(unsigned char *state);
 int gfx_context_load(const unsigned char *state);
 
 // cd/gfx_dma.c
-void DmaSlowCell(unsigned int source, unsigned int a, int len, unsigned char inc);
+void DmaSlowCell(u32 source, u32 a, int len, unsigned char inc);
 
 // cd/memory.c
 PICO_INTERNAL void PicoMemSetupCD(void);
-unsigned int PicoRead8_mcd_io(unsigned int a);
-unsigned int PicoRead16_mcd_io(unsigned int a);
-void PicoWrite8_mcd_io(unsigned int a, unsigned int d);
-void PicoWrite16_mcd_io(unsigned int a, unsigned int d);
+u32 PicoRead8_mcd_io(u32 a);
+u32 PicoRead16_mcd_io(u32 a);
+void PicoWrite8_mcd_io(u32 a, u32 d);
+void PicoWrite16_mcd_io(u32 a, u32 d);
 void pcd_state_loaded_mem(void);
 
 // pico.c
@@ -844,7 +845,7 @@ void ym2612_unpack_state(void);
 
 
 // videoport.c
-extern unsigned SATaddr, SATmask;
+extern u32 SATaddr, SATmask;
 static __inline void UpdateSAT(u32 a, u32 d)
 {
   unsigned num = (a^SATaddr) >> 3;
@@ -862,15 +863,15 @@ static __inline void VideoWriteVRAM(u32 a, u16 d)
     UpdateSAT(a, d);
 }
 
-PICO_INTERNAL_ASM void PicoVideoWrite(unsigned int a,unsigned short d);
-PICO_INTERNAL_ASM unsigned int PicoVideoRead(unsigned int a);
+PICO_INTERNAL_ASM void PicoVideoWrite(u32 a,unsigned short d);
+PICO_INTERNAL_ASM u32 PicoVideoRead(u32 a);
 unsigned char PicoVideoRead8DataH(int is_from_z80);
 unsigned char PicoVideoRead8DataL(int is_from_z80);
 unsigned char PicoVideoRead8CtlH(int is_from_z80);
 unsigned char PicoVideoRead8CtlL(int is_from_z80);
 unsigned char PicoVideoRead8HV_H(int is_from_z80);
 unsigned char PicoVideoRead8HV_L(int is_from_z80);
-extern int (*PicoDmaHook)(unsigned int source, int len, unsigned short **base, unsigned int *mask);
+extern int (*PicoDmaHook)(u32 source, int len, unsigned short **base, u32 *mask);
 void PicoVideoFIFOSync(int cycles);
 int PicoVideoFIFOHint(void);
 void PicoVideoFIFOMode(int active, int h40);
@@ -996,10 +997,8 @@ enum {
 extern int Pico32xDrawMode;
 
 // 32x/pwm.c
-unsigned int p32x_pwm_read16(unsigned int a, SH2 *sh2,
-  unsigned int m68k_cycles);
-void p32x_pwm_write16(unsigned int a, unsigned int d,
-  SH2 *sh2, unsigned int m68k_cycles);
+unsigned int p32x_pwm_read16(u32 a, SH2 *sh2, unsigned int m68k_cycles);
+void p32x_pwm_write16(u32 a, unsigned int d, SH2 *sh2, unsigned int m68k_cycles);
 void p32x_pwm_update(int *buf32, int length, int stereo);
 void p32x_pwm_ctl_changed(void);
 void p32x_pwm_schedule(unsigned int m68k_now);

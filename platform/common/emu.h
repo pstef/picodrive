@@ -55,6 +55,7 @@ typedef struct _currentConfig_t {
 	int s_PicoRegion;
 	int s_PicoAutoRgnOrder;
 	int s_PicoCDBuffers;
+	int s_PicoSndFilterAlpha;
 	int Frameskip;
 	int input_dev0;
 	int input_dev1;
@@ -146,7 +147,7 @@ void  emu_sound_stop(void);
 void  emu_sound_wait(void);
 
 /* used by some (but not all) platforms */
-void  emu_cmn_forced_frame(int no_scale, int do_emu);
+void  emu_cmn_forced_frame(int no_scale, int do_emu, void *buf);
 
 /* stuff to be implemented by platform code */
 extern const char *renderer_names[];

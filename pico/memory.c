@@ -438,7 +438,7 @@ static u32 PicoRead8_sram(u32 a)
 
   // XXX: this is banking unfriendly
   if (a < Pico.romsize)
-    return Pico.rom[a ^ 1];
+    return Pico.rom[MEM_BE2(a)];
   
   return m68k_unmapped_read8(a);
 }
@@ -582,7 +582,7 @@ static void PicoWrite16_z80(u32 a, u32 d)
 #ifndef _ASM_MEMORY_C
 
 // IO/control area (0xa10000 - 0xa1ffff)
-unsigned int PicoRead8_io(unsigned int a)
+u32 PicoRead8_io(u32 a)
 {
   u32 d;
 
@@ -613,7 +613,7 @@ end:
   return d;
 }
 
-unsigned int PicoRead16_io(unsigned int a)
+u32 PicoRead16_io(u32 a)
 {
   u32 d;
 
@@ -644,7 +644,7 @@ end:
   return d;
 }
 
-void PicoWrite8_io(unsigned int a, unsigned int d)
+void PicoWrite8_io(u32 a, u32 d)
 {
   if ((a & 0xffe1) == 0x0001) { // I/O ports (verified: only LSB!)
     io_ports_write(a, d);
@@ -667,7 +667,7 @@ void PicoWrite8_io(unsigned int a, unsigned int d)
   PicoWrite8_32x(a, d);
 }
 
-void PicoWrite16_io(unsigned int a, unsigned int d)
+void PicoWrite16_io(u32 a, u32 d)
 {
   if ((a & 0xffe0) == 0x0000) { // I/O ports (verified: only LSB!)
     io_ports_write(a, d);
@@ -832,12 +832,12 @@ PICO_INTERNAL void PicoMemSetup(void)
   PicoCpuCM68k.fetch32 = NULL;
 #endif
 #ifdef EMU_F68K
-  PicoCpuFM68k.read_byte  = m68k_read8;
-  PicoCpuFM68k.read_word  = m68k_read16;
-  PicoCpuFM68k.read_long  = m68k_read32;
-  PicoCpuFM68k.write_byte = m68k_write8;
-  PicoCpuFM68k.write_word = m68k_write16;
-  PicoCpuFM68k.write_long = m68k_write32;
+  PicoCpuFM68k.read_byte  = (void *)m68k_read8;
+  PicoCpuFM68k.read_word  = (void *)m68k_read16;
+  PicoCpuFM68k.read_long  = (void *)m68k_read32;
+  PicoCpuFM68k.write_byte = (void *)m68k_write8;
+  PicoCpuFM68k.write_word = (void *)m68k_write16;
+  PicoCpuFM68k.write_long = (void *)m68k_write32;
 
   // setup FAME fetchmap
   {

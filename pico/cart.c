@@ -8,13 +8,19 @@
  */
 
 #include "pico_int.h"
-#include "../cpu/debug.h"
-#include "../unzip/unzip.h"
-#include <zlib.h>
+#include <cpu/debug.h>
 
 #ifdef USE_LIBRETRO_VFS
 #include "file_stream_transforms.h"
 #endif
+
+#if defined(USE_LIBCHDR)
+#include "libchdr/chd.h"
+#include "libchdr/cdrom.h"
+#endif
+
+#include <unzip/unzip.h>
+#include <zlib.h>
 
 static int rom_alloc_size;
 static const char *rom_exts[] = { "bin", "gen", "smd", "iso", "sms", "gg", "sg" };
@@ -102,6 +108,19 @@ struct zip_file {
   unsigned int pos;
 };
 
+#if defined(USE_LIBCHDR)
+struct chd_struct {
+  pm_file file;
+  int fpos;
+  int sectorsize;
+  chd_file *chd;
+  int unitbytes;
+  int hunkunits;
+  u8 *hunk;
+  int hunknum;
+};
+#endif
+
 pm_file *pm_open(const char *path)
 {
   pm_file *file = NULL;
@@ -184,6 +203,9 @@ zip_failed:
 
     if (fread(&cso->header, 1, sizeof(cso->header), f) != sizeof(cso->header))
       goto cso_failed;
+    cso->header.block_size = CPU_LE4(cso->header.block_size);
+    cso->header.total_bytes = CPU_LE4(cso->header.total_bytes);
+    cso->header.total_bytes_high = CPU_LE4(cso->header.total_bytes_high);
 
     if (strncmp(cso->header.magic, "CISO", 4) != 0) {
       elprintf(EL_STATUS, "cso: bad header");
@@ -225,6 +247,50 @@ cso_failed:
     if (f != NULL) fclose(f);
     return NULL;
   }
+#if defined(USE_LIBCHDR)
+  else if (strcasecmp(ext, "chd") == 0)
+  {
+    struct chd_struct *chd = NULL;
+    chd_file *cf = NULL;
+    const chd_header *head;
+
+    if (chd_open(path, CHD_OPEN_READ, NULL, &cf) != CHDERR_NONE)
+      goto chd_failed;
+
+    // sanity check
+    head = chd_get_header(cf);
+    if ((head->hunkbytes == 0) || (head->hunkbytes % CD_FRAME_SIZE))
+      goto chd_failed;
+
+    chd = calloc(1, sizeof(*chd));
+    if (chd == NULL)
+      goto chd_failed;
+    chd->hunk = (u8 *)malloc(head->hunkbytes);
+    if (!chd->hunk)
+      goto chd_failed;
+
+    chd->chd = cf;
+    chd->unitbytes = head->unitbytes;
+    chd->hunkunits = head->hunkbytes / head->unitbytes;
+    chd->sectorsize = CD_MAX_SECTOR_DATA; // default to RAW mode
+
+    chd->fpos = 0;
+    chd->hunknum = -1;
+
+    chd->file.file = chd;
+    chd->file.type = PMT_CHD;
+    // subchannel data is skipped, remove it from total size
+    chd->file.size = chd_get_header(cf)->logicalbytes / CD_FRAME_SIZE * CD_MAX_SECTOR_DATA;
+    strncpy(chd->file.ext, ext, sizeof(chd->file.ext) - 1);
+    return &chd->file;
+
+chd_failed:
+    /* invalid CHD file */
+    if (chd != NULL) free(chd);
+    if (cf != NULL) chd_close(cf);
+    return NULL;
+  }
+#endif
 
   /* not a zip, treat as uncompressed file */
   f = fopen(path, "rb");
@@ -251,6 +317,88 @@ cso_failed:
 
   return file;
 }
+
+void pm_sectorsize(int length, pm_file *stream)
+{
+  // CHD reading needs to know how much binary data is in one data sector(=unit)
+#if defined(USE_LIBCHDR)
+  if (stream->type == PMT_CHD) {
+    struct chd_struct *chd = stream->file;
+    chd->sectorsize = length;
+    if (chd->sectorsize > chd->unitbytes)
+      elprintf(EL_STATUS|EL_ANOMALY, "cd: sector size %d too large for unit %d", chd->sectorsize, chd->unitbytes);
+  }
+#endif
+}
+
+#if defined(USE_LIBCHDR)
+static size_t _pm_read_chd(void *ptr, size_t bytes, pm_file *stream, int is_audio)
+{
+  int ret = 0;
+
+  if (stream->type == PMT_CHD) {
+    struct chd_struct *chd = stream->file;
+    // calculate sector and offset in sector
+    int sectsz = is_audio ? CD_MAX_SECTOR_DATA : chd->sectorsize;
+    int sector = chd->fpos / sectsz;
+    int offset = chd->fpos - (sector * sectsz);
+    // calculate hunk and sector offset in hunk
+    int hunknum = sector / chd->hunkunits;
+    int hunksec = sector - (hunknum * chd->hunkunits);
+    int hunkofs = hunksec * chd->unitbytes;
+
+    while (bytes != 0) {
+      // data left in current sector
+      int len = sectsz - offset;
+
+      // update hunk cache if needed
+      if (hunknum != chd->hunknum) {
+        chd_read(chd->chd, hunknum, chd->hunk);
+        chd->hunknum = hunknum;
+      }
+      if (len > bytes)
+        len = bytes;
+
+#ifdef CPU_IS_LE
+      if (is_audio) {
+        // convert big endian audio samples
+        u16 *dst = ptr, v;
+        u8 *src = chd->hunk + hunkofs + offset;
+        int i;
+
+        for (i = 0; i < len; i += 4) {
+          v = *src++ << 8; *dst++ = v | *src++;
+          v = *src++ << 8; *dst++ = v | *src++;
+        }
+      } else
+#endif
+        memcpy(ptr, chd->hunk + hunkofs + offset, len);
+
+      // house keeping
+      ret += len;
+      chd->fpos += len;
+      bytes -= len;
+
+      // no need to advance internals if there's no more data to read
+      if (bytes) {
+        ptr += len;
+        offset = 0;
+
+        sector ++;
+        hunksec ++;
+        hunkofs += chd->unitbytes;
+        if (hunksec >= chd->hunkunits) {
+          hunksec = 0;
+          hunkofs = 0;
+          hunknum ++;
+        }
+      }
+    }
+  }
+
+  return ret;
+}
+#endif
 
 size_t pm_read(void *ptr, size_t bytes, pm_file *stream)
 {
@@ -352,10 +500,44 @@ size_t pm_read(void *ptr, size_t bytes, pm_file *stream)
       index_end = cso->index[block+1];
     }
   }
+#if defined(USE_LIBCHDR)
+  else if (stream->type == PMT_CHD)
+  {
+    ret = _pm_read_chd(ptr, bytes, stream, 0);
+  }
+#endif
   else
     ret = 0;
 
   return ret;
+}
+
+size_t pm_read_audio(void *ptr, size_t bytes, pm_file *stream)
+{
+#if !(CPU_IS_LE)
+  if (stream->type == PMT_UNCOMPRESSED)
+  {
+    // convert little endian audio samples from WAV file
+    int ret = pm_read(ptr, bytes, stream);
+    u16 *dst = ptr, v;
+    u8 *src = ptr;
+    int i;
+
+    for (i = 0; i < ret; i += 4) {
+      v = *src++; *dst++ = v | (*src++ << 8);
+      v = *src++; *dst++ = v | (*src++ << 8);
+    }
+    return ret;
+  }
+  else
+#endif
+#if defined(USE_LIBCHDR)
+  if (stream->type == PMT_CHD)
+  {
+    return _pm_read_chd(ptr, bytes, stream, 1);
+  }
+#endif
+  return pm_read(ptr, bytes, stream);
 }
 
 int pm_seek(pm_file *stream, long offset, int whence)
@@ -418,6 +600,19 @@ int pm_seek(pm_file *stream, long offset, int whence)
     }
     return cso->fpos_out;
   }
+#if defined(USE_LIBCHDR)
+  else if (stream->type == PMT_CHD)
+  {
+    struct chd_struct *chd = stream->file;
+    switch (whence)
+    {
+      case SEEK_CUR: chd->fpos += offset; break;
+      case SEEK_SET: chd->fpos  = offset; break;
+      case SEEK_END: chd->fpos  = stream->size - offset; break;
+    }
+    return chd->fpos;
+  }
+#endif
   else
     return -1;
 }
@@ -443,6 +638,15 @@ int pm_close(pm_file *fp)
     free(fp->param);
     fclose(fp->file);
   }
+#if defined(USE_LIBCHDR)
+  else if (fp->type == PMT_CHD)
+  {
+    struct chd_struct *chd = fp->file;
+    chd_close(chd->chd);
+    if (chd->hunk)
+      free(chd->hunk);
+  }
+#endif
   else
     ret = EOF;
 
@@ -453,6 +657,7 @@ int pm_close(pm_file *fp)
 // byteswap, data needs to be int aligned, src can match dst
 void Byteswap(void *dst, const void *src, int len)
 {
+#if CPU_IS_LE
   const unsigned int *ps = src;
   unsigned int *pd = dst;
   int i, m;
@@ -465,14 +670,15 @@ void Byteswap(void *dst, const void *src, int len)
     unsigned int t = ps[i];
     pd[i] = ((t & m) << 8) | ((t & ~m) >> 8);
   }
+#endif
 }
 
 // Interleve a 16k block and byteswap
 static int InterleveBlock(unsigned char *dest,unsigned char *src)
 {
   int i=0;
-  for (i=0;i<0x2000;i++) dest[(i<<1)  ]=src[       i]; // Odd
-  for (i=0;i<0x2000;i++) dest[(i<<1)+1]=src[0x2000+i]; // Even
+  for (i=0;i<0x2000;i++) dest[(i<<1)+MEM_BE2(1)]=src[       i]; // Odd
+  for (i=0;i<0x2000;i++) dest[(i<<1)+MEM_BE2(0)]=src[0x2000+i]; // Even
   return 0;
 }
 
@@ -615,7 +821,7 @@ int PicoCartInsert(unsigned char *rom, unsigned int romsize, const char *carthw_
   // This will hang the emu, but will prevent nasty crashes.
   // note: 4 bytes are padded to every ROM
   if (rom != NULL)
-    *(unsigned long *)(rom+romsize) = 0xFFFE4EFA; // 4EFA FFFE byteswapped
+    *(unsigned long *)(rom+romsize) = CPU_BE2(0x4EFAFFFE);
 
   Pico.rom=rom;
   Pico.romsize=romsize;
@@ -714,7 +920,7 @@ static int rom_strcmp(int rom_offset, const char *s1)
   if (rom_offset + len > Pico.romsize)
     return 0;
   for (i = 0; i < len; i++)
-    if (s1[i] != s_rom[(i + rom_offset) ^ 1])
+    if (s1[i] != s_rom[MEM_BE2(i + rom_offset)])
       return 1;
   return 0;
 }

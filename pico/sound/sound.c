@@ -11,7 +11,6 @@
 #include "ym2612.h"
 #include "sn76496.h"
 #include "../pico_int.h"
-#include "../cd/cue.h"
 #include "mix.h"
 #include "emu2413/emu2413.h"
 
@@ -51,8 +50,6 @@ PICO_INTERNAL void PsndReset(void)
   // PsndRerate calls YM2612Init, which also resets
   PsndRerate(0);
   timers_reset();
-
-  mix_reset(PicoIn.sndFilter ? PicoIn.sndFilterRange : 0);
 }
 
 
@@ -107,6 +104,7 @@ void PsndRerate(int preserve_state)
 
   // set mixer
   PsndMix_32_to_16l = (PicoIn.opt & POPT_EN_STEREO) ? mix_32_to_16l_stereo : mix_32_to_16_mono;
+  mix_reset(PicoIn.opt & POPT_EN_SNDFILTER ? PicoIn.sndFilterAlpha : 0);
 
   if (PicoIn.AHW & PAHW_PICO)
     PicoReratePico();
@@ -266,7 +264,7 @@ static void cdda_raw_update(int *buffer, int length)
   if (PicoIn.sndRate <  22050 - 100) mult = 4;
   cdda_bytes *= mult;
 
-  ret = pm_read(cdda_out_buffer, cdda_bytes, Pico_mcd->cdda_stream);
+  ret = pm_read_audio(cdda_out_buffer, cdda_bytes, Pico_mcd->cdda_stream);
   if (ret < cdda_bytes) {
     memset((char *)cdda_out_buffer + ret, 0, cdda_bytes - ret);
     Pico_mcd->cdda_stream = NULL;

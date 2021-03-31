@@ -43,12 +43,12 @@ u16 scan_block(u32 base_pc, int is_slave, u8 *op_flags, u32 *end_pc,
 #define DRC_REG_LL	(__ILP32__ || _WIN32)
 #elif defined(__mips__)
 #define	DRC_SR_REG	"s6"
-#define DRC_REG_LL	(_MIPS_SIM == _ABIN32)
+#define DRC_REG_LL	(_MIPS_SZPTR > _MIPS_SZLONG) // (_MIPS_SIM == _ABIN32)
 #elif defined(__riscv__) || defined(__riscv)
 #define	DRC_SR_REG	"s11"
 #define DRC_REG_LL	0	// no ABI for (__ILP32__ && __riscv_xlen != 32)
 #elif defined(__powerpc__)
-#define	DRC_SR_REG	"r30"
+#define	DRC_SR_REG	"r28"
 #define DRC_REG_LL	0	// no ABI for __ILP32__
 #elif defined(__i386__)
 #define	DRC_SR_REG	"edi"

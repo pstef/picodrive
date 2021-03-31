@@ -12,8 +12,11 @@
 #if defined(USE_BGR555)
 #define PXCONV(t)   (t)
 #define PXPRIO      0x8000  // prio in MSB
+#elif defined(USE_BGR565)
+#define PXCONV(t)   (((t)&mr)  | (((t)&(mg|mb)) << 1) | (((t)&mp) >> 10))
+#define PXPRIO      0x0020  // prio in LS green bit
 #else // RGB565 
-#define PXCONV(t)   ((((t)&m1) << 11) | (((t)&m2) << 1) | (((t)&m3) >> 10))
+#define PXCONV(t)   ((((t)&mr) << 11) | (((t)&mg) << 1) | (((t)&(mp|mb)) >> 10))
 #define PXPRIO      0x0020  // prio in LS green bit
 #endif
 
@@ -26,19 +29,20 @@ int DrawLineDestIncrement32x;
 
 static void convert_pal555(int invert_prio)
 {
-  unsigned int *ps = (void *)Pico32xMem->pal;
-  unsigned int *pd = (void *)Pico32xMem->pal_native;
-  unsigned int m1 = 0x001f001f;
-  unsigned int m2 = 0x03e003e0;
-  unsigned int m3 = 0xfc00fc00; // includes prio bit
-  unsigned int inv = 0;
+  u32 *ps = (void *)Pico32xMem->pal;
+  u32 *pd = (void *)Pico32xMem->pal_native;
+  u32 mr = 0x001f001f; // masks for red, green, blue, prio
+  u32 mg = 0x03e003e0;
+  u32 mb = 0x7c007c00;
+  u32 mp = 0x80008000;
+  u32 inv = 0;
   int i;
 
   if (invert_prio)
     inv = 0x80008000;
 
   for (i = 0x100/2; i > 0; i--, ps++, pd++) {
-    unsigned int t = *ps ^ inv;
+    u32 t = *ps ^ inv;
     *pd = PXCONV(t);
   }
 
@@ -48,9 +52,10 @@ static void convert_pal555(int invert_prio)
 // direct color mode
 #define do_line_dc(pd, p32x, pmd, inv, pmd_draw_code)             \
 {                                                                 \
-  const unsigned int m1 = 0x001f;                                 \
-  const unsigned int m2 = 0x03e0;                                 \
-  const unsigned int m3 = 0x7c00;                                 \
+  const u16 mr = 0x001f;                                          \
+  const u16 mg = 0x03e0;                                          \
+  const u16 mb = 0x7c00;                                          \
+  const u16 mp = 0x0000;                                          \
   unsigned short t;                                               \
   int i = 320;                                                    \
                                                                   \
@@ -76,11 +81,11 @@ static void convert_pal555(int invert_prio)
   int i = 320;                                                    \
   while (i > 0) {                                                 \
     for (; i > 0 && (*pmd & 0x3f) == mdbg; pd++, pmd++, i--) {    \
-      t = pal[*(unsigned char *)((uintptr_t)(p32x++) ^ 1)];       \
+      t = pal[*(unsigned char *)(MEM_BE2((uintptr_t)(p32x++)))];  \
       *pd = t;                                                    \
     }                                                             \
     for (; i > 0 && (*pmd & 0x3f) != mdbg; pd++, pmd++, i--) {    \
-      t = pal[*(unsigned char *)((uintptr_t)(p32x++) ^ 1)];       \
+      t = pal[*(unsigned char *)(MEM_BE2((uintptr_t)(p32x++)))];  \
       if (t & PXPRIO)                                             \
         *pd = t;                                                  \
       else                                                        \
@@ -176,6 +181,7 @@ static void do_loop_dc##name(unsigned short *dst,               \
     p32x = dram + dram[l];                                      \
     do_line_dc(dst, p32x, pmd, inv_bit, md_code);               \
     post_code;                                                  \
+    dst += DrawLineDestIncrement32x/2 - 320;                    \
   }                                                             \
 }                                                               \
                                                                 \
@@ -197,6 +203,7 @@ static void do_loop_pp##name(unsigned short *dst,               \
     p32x += (lines_sft_offs >> 8) & 1;                          \
     do_line_pp(dst, p32x, pmd, md_code);                        \
     post_code;                                                  \
+    dst += DrawLineDestIncrement32x/2 - 320;                    \
   }                                                             \
 }                                                               \
                                                                 \
@@ -217,6 +224,7 @@ static void do_loop_rl##name(unsigned short *dst,               \
     p32x = dram + dram[l];                                      \
     do_line_rl(dst, p32x, pmd, md_code);                        \
     post_code;                                                  \
+    dst += DrawLineDestIncrement32x/2 - 320;                    \
   }                                                             \
 }
 
@@ -302,7 +310,7 @@ void PicoDraw32xLayerMdOnly(int offs, int lines)
 
   if (!(Pico.video.reg[12] & 1)) {
     // 32col mode. for some render modes MD pixel data carries an offset
-    if (!(PicoIn.opt & (POPT_ALT_RENDERER|POPT_DIS_32C_BORDER)))
+    if (!(PicoIn.opt & POPT_DIS_32C_BORDER))
       pmd += 32;
     poffs = 32;
     plen = 256;
@@ -332,11 +340,11 @@ void PicoDraw32xLayerMdOnly(int offs, int lines)
 void PicoDrawSetOutFormat32x(pdso_t which, int use_32x_line_mode)
 {
   if (which == PDF_RGB555) {
-    // need CLUT pixels in PicoDraw2FB for layer transparency
+    // CLUT pixels needed as well, for layer priority
     PicoDrawSetInternalBuf(Pico.est.Draw2FB, 328);
-    PicoDrawSetOutBufMD(DrawLineDestBase32x, DrawLineDestIncrement32x);
+    PicoDrawSetOutBufMD(NULL, 0);
   } else {
-    // use the same layout as alt renderer
+    // store CLUT pixels, same layout as alt renderer
     PicoDrawSetInternalBuf(NULL, 0);
     PicoDrawSetOutBufMD(Pico.est.Draw2FB, 328);
   }

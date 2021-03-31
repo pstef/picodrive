@@ -25,14 +25,14 @@
 #include "../pico_int.h"
 #include "../memory.h"
 
-#include "../../cpu/sh2/compiler.h"
+#include <cpu/sh2/compiler.h>
 DRC_DECLARE_SR;
 
 // DMAC handling
 struct dma_chan {
-  unsigned int sar, dar;  // src, dst addr
-  unsigned int tcr;       // transfer count
-  unsigned int chcr;      // chan ctl
+  u32 sar, dar;  // src, dst addr
+  u32 tcr;       // transfer count
+  u32 chcr;      // chan ctl
   // -- dm dm sm sm  ts ts ar am  al ds dl tb  ta ie te de
   // ts - transfer size: 1, 2, 4, 16 bytes
   // ar - auto request if 1, else dreq signal
@@ -47,11 +47,11 @@ struct dma_chan {
 
 struct dmac {
   struct dma_chan chan[2];
-  unsigned int vcrdma0;
-  unsigned int unknown0;
-  unsigned int vcrdma1;
-  unsigned int unknown1;
-  unsigned int dmaor;
+  u32 vcrdma0;
+  u32 unknown0;
+  u32 vcrdma1;
+  u32 unknown1;
+  u32 dmaor;
   // -- pr ae nmif dme
   // pr - priority: chan0 > chan1 or round-robin
   // ae - address error
@@ -290,7 +290,7 @@ u32 REGPARM(2) sh2_peripheral_read16(u32 a, SH2 *sh2)
   u32 d;
 
   a &= 0x1fe;
-  d = r[(a / 2) ^ 1];
+  d = r[MEM_BE2(a / 2)];
 
   elprintf_sh2(sh2, EL_32XP, "peri r16 [%08x]     %04x @%06x",
     a | ~0x1ff, d, sh2_pc(sh2));
@@ -420,7 +420,7 @@ void REGPARM(3) sh2_peripheral_write16(u32 a, u32 d, SH2 *sh2)
     return;
   }
 
-  r[(a / 2) ^ 1] = d;
+  r[MEM_BE2(a / 2)] = d;
   if ((a & 0x1c0) == 0x140)
     p32x_sh2_poll_event(sh2, SH2_STATE_CPOLL, SekCyclesDone());
 }

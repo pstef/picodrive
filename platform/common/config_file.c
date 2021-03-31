@@ -124,13 +124,15 @@ int config_write(const char *fname)
 			const char **names = (const char **)me->data;
 			for (t = 0; names[t] != NULL; t++) {
 				if (*(int *)me->var == t) {
-					strncpy(line, names[t], sizeof(line));
+					strncpy(line, names[t], sizeof(line)-1);
+					line[sizeof(line)-1] = '\0';
 					goto write_line;
 				}
 			}
 		}
 		else if (me->generate_name != NULL) {
-			strncpy(line, me->generate_name(0, &dummy), sizeof(line));
+			strncpy(line, me->generate_name(me->id, &dummy), sizeof(line)-1);
+			line[sizeof(line)-1] = '\0';
 			goto write_line;
 		}
 		else
@@ -238,9 +240,9 @@ int config_readlrom(const char *fname)
 		tmp++;
 		mystrip(tmp);
 
-		len = sizeof(rom_fname_loaded);
+		len = sizeof(rom_fname_loaded)-1;
 		strncpy(rom_fname_loaded, tmp, len);
-		rom_fname_loaded[len-1] = 0;
+		rom_fname_loaded[len] = 0;
 		ret = 0;
 		break;
 	}
@@ -275,6 +277,11 @@ static int custom_read(menu_entry *me, const char *var, const char *val)
 				PicoIn.opt &= ~POPT_EN_STEREO;
 			} else
 				return 0;
+			return 1;
+
+		case MA_OPT_SOUND_ALPHA:
+			if (strcasecmp(var, "Filter strength (alpha)") != 0) return 0;
+			PicoIn.sndFilterAlpha = 0x10000 * atof(val);
 			return 1;
 
 		case MA_OPT_REGION:
@@ -347,12 +354,12 @@ static int custom_read(menu_entry *me, const char *var, const char *val)
 			// XXX: use enum
 			if (strcasecmp(var, "Wait for vsync") != 0) return 0;
 			if        (strcasecmp(val, "never") == 0) {
-				currentConfig.EmuOpt &= ~0x12000;
+				currentConfig.EmuOpt &= ~(EOPT_VSYNC|EOPT_VSYNC_MODE);
 			} else if (strcasecmp(val, "sometimes") == 0) {
-				currentConfig.EmuOpt |=  0x12000;
+				currentConfig.EmuOpt |=  (EOPT_VSYNC|EOPT_VSYNC_MODE);
 			} else if (strcasecmp(val, "always") == 0) {
-				currentConfig.EmuOpt &= ~0x12000;
-				currentConfig.EmuOpt |=  0x02000;
+				currentConfig.EmuOpt &= ~EOPT_VSYNC_MODE;
+				currentConfig.EmuOpt |=  EOPT_VSYNC;
 			} else
 				return 0;
 			return 1;
@@ -399,7 +406,7 @@ static int parse_bind_val(const char *val, int *type)
 
 static void keys_parse_all(FILE *f)
 {
-	char line[256], *var, *val;
+	char line[640], *var, *val;
 	int dev_id = -1;
 	int acts, type;
 	int ret;
