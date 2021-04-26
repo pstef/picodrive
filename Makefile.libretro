@@ -198,8 +198,8 @@ else ifeq ($(platform), psp1)
 	TARGET := $(TARGET_NAME)_libretro_$(platform).a
 	CC = psp-gcc$(EXE_EXT)
 	AR = psp-ar$(EXE_EXT)
-	CFLAGS += -G0 -ftracer
-	CFLAGS += -DPSP
+	CFLAGS += -DPSP -DUSE_BGR565 -G0 -ftracer
+	CFLAGS += -I$(shell psp-config --pspsdk-path)/include
 	STATIC_LINKING = 1
 	NO_MMAP = 1
 
