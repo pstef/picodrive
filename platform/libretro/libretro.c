@@ -234,6 +234,14 @@ int __builtin_parity(unsigned v)
    v ^= v >> 4;
    return (0x6996 >> (v&0xf)) & 1;
 }
+#elif defined(PSP)
+int _flush_cache(char *addr, const int size, const int op)
+{
+   //sceKernelDcacheWritebackAll();
+   sceKernelDcacheWritebackRange(addr, size);
+   sceKernelIcacheInvalidateRange(addr, size);
+   return 0;
+}
 #endif
 
 #ifdef __MACH__
