@@ -203,19 +203,35 @@ static char sh2dasm_buff[64];
 		(ulong)(sh2)->poll_addr, (sh2)->poll_cycles, (sh2)->poll_cnt); \
 }
 
-#if (DRC_DEBUG & (8|256|512|1024)) || defined(PDB)
 #if (DRC_DEBUG & (256|512|1024))
 static SH2 csh2[2][8];
 static FILE *trace[2];
 static int topen[2];
 #endif
+#if (DRC_DEBUG & 8)
+static u32 lastpc, lastcnt;
+static void *lastblock;
+#endif
+#if (DRC_DEBUG & (8|256|512|1024)) || defined(PDB)
 static void REGPARM(3) *sh2_drc_log_entry(void *block, SH2 *sh2, u32 sr)
 {
   if (block != NULL) {
-    dbg(8, "= %csh2 enter %08x %p, c=%d", sh2->is_slave ? 's' : 'm',
-      sh2->pc, block, (signed int)sr >> 12);
 #if defined PDB
+    dbg(8, "= %csh2 enter %08x %p, c=%d", sh2->is_slave?'s':'m',
+      sh2->pc, block, (signed int)sr >> 12);
     pdb_step(sh2, sh2->pc);
+#elif (DRC_DEBUG & 8)
+    if (lastpc != sh2->pc) {
+      if (lastcnt)
+        dbg(8, "= %csh2 enter %08x %p (%d times), c=%d", sh2->is_slave?'s':'m',
+          lastpc, lastblock, lastcnt, (signed int)sr >> 12);
+      dbg(8, "= %csh2 enter %08x %p, c=%d", sh2->is_slave?'s':'m',
+        sh2->pc, block, (signed int)sr >> 12);
+      lastpc = sh2->pc;
+      lastblock = block;
+      lastcnt = 0;
+    } else
+      lastcnt++;
 #elif (DRC_DEBUG & 256)
   {
     static SH2 fsh2;
@@ -1339,6 +1355,7 @@ static void rcache_add_vreg_alias(int x, sh2_reg_e r);
 static void rcache_remove_vreg_alias(int x, sh2_reg_e r);
 static void rcache_evict_vreg(int x);
 static void rcache_remap_vreg(int x);
+static int rcache_get_reg(sh2_reg_e r, rc_gr_mode mode, int *hr);
 
 static void rcache_set_x16(int hr, int s16_, int u16_)
 {
@@ -1444,7 +1461,6 @@ static int rcache_is_u16(int hr)
   } */ \
 }
 
-#if PROPAGATE_CONSTANTS
 static inline int gconst_alloc(sh2_reg_e r)
 {
   int i, n = -1;
@@ -1481,7 +1497,6 @@ static void gconst_new(sh2_reg_e r, u32 val)
   if (guest_regs[r].vreg >= 0)
     rcache_remove_vreg_alias(guest_regs[r].vreg, r);
 }
-#endif
 
 static int gconst_get(sh2_reg_e r, u32 *val)
 {
@@ -2661,6 +2676,10 @@ static int emit_get_rbase_and_offs(SH2 *sh2, sh2_reg_e r, int rmode, s32 *offs)
   } else {
     // known fixed host address
     la = split_address(la + ((a + *offs) & mask), omask, offs);
+    if (la == 0) {
+      la = *offs;
+      *offs = 0;
+    }
     hr = rcache_get_tmp();
     emith_move_r_ptr_imm(hr, la);
   }
@@ -5658,6 +5677,9 @@ int sh2_execute_drc(SH2 *sh2c, int cycles)
   // others are usual SH2 flags
   sh2c->sr &= 0x3f3;
   sh2c->sr |= cycles << 12;
+#if (DRC_DEBUG & 8)
+  lastpc = lastcnt = 0;
+#endif
 
   sh2c->state |= SH2_IN_DRC;
   sh2_drc_entry(sh2c);
@@ -5667,6 +5689,11 @@ int sh2_execute_drc(SH2 *sh2c, int cycles)
   ret_cycles = (int32_t)sh2c->sr >> 12;
   if (ret_cycles > 0)
     dbg(1, "warning: drc returned with cycles: %d, pc %08x", ret_cycles, sh2c->pc);
+#if (DRC_DEBUG & 8)
+  if (lastcnt)
+    dbg(8, "= %csh2 enter %08x %p (%d times), c=%d", sh2c->is_slave?'s':'m',
+      lastpc, lastblock, lastcnt, (signed int)sh2c->sr >> 12);
+#endif
 
   sh2c->sr &= 0x3f3;
   return ret_cycles;
