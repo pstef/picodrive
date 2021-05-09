@@ -195,6 +195,7 @@ USE_FRONTEND = 1
 endif
 ifeq "$(PLATFORM)" "libretro"
 OBJS += platform/libretro/libretro.o
+OBJS += platform/libretro/libretro-common/compat/compat_strcasestr.o
 ifeq "$(USE_LIBRETRO_VFS)" "1"
 OBJS += platform/libretro/libretro-common/compat/compat_posix_string.o
 OBJS += platform/libretro/libretro-common/compat/compat_strl.o
