@@ -759,7 +759,7 @@ void retro_get_system_info(struct retro_system_info *info)
 #define _GIT_VERSION "-" GIT_VERSION
 #endif
    info->library_version = VERSION _GIT_VERSION;
-   info->valid_extensions = "bin|gen|smd|md|32x|cue|iso|chd|sms";
+   info->valid_extensions = "bin|gen|smd|md|32x|cue|iso|chd|sms|m3u";
    info->need_fullpath = true;
 }
 
@@ -986,12 +986,62 @@ void retro_cheat_set(unsigned index, bool enabled, const char *code)
 }
 
 /* multidisk support */
+static unsigned int disk_initial_index;
 static bool disk_ejected;
 static unsigned int disk_current_index;
 static unsigned int disk_count;
+static char disk_initial_path[PATH_MAX];
 static struct disks_state {
    char *fname;
+   char *flabel;
+   int internal_index;
 } disks[8];
+
+static void get_disk_label(char *disk_label, const char *disk_path, size_t len)
+{
+   const char *base = NULL;
+
+   if (!disk_path || (*disk_path == '\0'))
+      return;
+
+   base = strrchr(disk_path, SLASH);
+   if (!base)
+      base = disk_path;
+
+   if (*base == SLASH)
+      base++;
+
+   strncpy(disk_label, base, len - 1);
+   disk_label[len - 1] = '\0';
+
+   char *ext = strrchr(disk_label, '.');
+   if (ext)
+      *ext = '\0';
+}
+
+static void disk_init(void)
+{
+   size_t i;
+
+   disk_ejected       = false;
+   disk_current_index = 0;
+   disk_count         = 0;
+
+   for (i = 0; i < sizeof(disks) / sizeof(disks[0]); i++)
+   {
+      if (disks[i].fname != NULL)
+      {
+         free(disks[i].fname);
+         disks[i].fname = NULL;
+      }
+      if (disks[i].flabel != NULL)
+      {
+         free(disks[i].flabel);
+         disks[i].flabel = NULL;
+      }
+      disks[i].internal_index = 0;
+   }
+}
 
 static bool disk_set_eject_state(bool ejected)
 {
@@ -1054,20 +1104,44 @@ static unsigned int disk_get_num_images(void)
 static bool disk_replace_image_index(unsigned index,
    const struct retro_game_info *info)
 {
-   bool ret = true;
+   char *old_fname  = NULL;
+   char *old_flabel = NULL;
+   bool ret         = true;
 
    if (index >= sizeof(disks) / sizeof(disks[0]))
       return false;
+
+   old_fname  = disks[index].fname;
+   old_flabel = disks[index].flabel;
 
    if (disks[index].fname != NULL)
       free(disks[index].fname);
    disks[index].fname = NULL;
 
+   if (disks[index].flabel != NULL)
+      free(disks[index].flabel);
+   disks[index].flabel = NULL;
+
+   disks[index].internal_index = 0;
+
    if (info != NULL) {
+      char disk_label[PATH_MAX];
+      disk_label[0] = '\0';
+
       disks[index].fname = strdup(info->path);
+
+      get_disk_label(disk_label, info->path, PATH_MAX);
+      disks[index].flabel = strdup(disk_label);
+      
       if (index == disk_current_index)
          ret = disk_set_image_index(index);
    }
+
+   if (old_fname != NULL)
+      free(old_fname);
+
+   if (old_flabel != NULL)
+      free(old_flabel);
 
    return ret;
 }
@@ -1081,6 +1155,64 @@ static bool disk_add_image_index(void)
    return true;
 }
 
+static bool disk_set_initial_image(unsigned index, const char *path)
+{
+   if (index >= sizeof(disks) / sizeof(disks[0]))
+      return false;
+
+   if (!path || (*path == '\0'))
+      return false;
+
+   disk_initial_index = index;
+
+   strncpy(disk_initial_path, path, sizeof(disk_initial_path) - 1);
+   disk_initial_path[sizeof(disk_initial_path) - 1] = '\0';
+
+   return true;
+}
+
+static bool disk_get_image_path(unsigned index, char *path, size_t len)
+{
+   const char *fname = NULL;
+
+   if (len < 1)
+      return false;
+
+   if (index >= sizeof(disks) / sizeof(disks[0]))
+      return false;
+
+   fname = disks[index].fname;
+
+   if (!fname || (*fname == '\0'))
+      return false;
+
+   strncpy(path, fname, len - 1);
+   path[len - 1] = '\0';
+
+   return true;
+}
+
+static bool disk_get_image_label(unsigned index, char *label, size_t len)
+{
+   const char *flabel = NULL;
+
+   if (len < 1)
+      return false;
+
+   if (index >= sizeof(disks) / sizeof(disks[0]))
+      return false;
+
+   flabel = disks[index].flabel;
+
+   if (!flabel || (*flabel == '\0'))
+      return false;
+
+   strncpy(label, flabel, len - 1);
+   label[len - 1] = '\0';
+
+   return true;
+}
+
 static struct retro_disk_control_callback disk_control = {
    disk_set_eject_state,
    disk_get_eject_state,
@@ -1089,6 +1221,19 @@ static struct retro_disk_control_callback disk_control = {
    disk_get_num_images,
    disk_replace_image_index,
    disk_add_image_index,
+};
+
+static struct retro_disk_control_ext_callback disk_control_ext = {
+   .set_eject_state     = disk_set_eject_state,
+   .get_eject_state     = disk_get_eject_state,
+   .get_image_index     = disk_get_image_index,
+   .set_image_index     = disk_set_image_index,
+   .get_num_images      = disk_get_num_images,
+   .replace_image_index = disk_replace_image_index,
+   .add_image_index     = disk_add_image_index,
+   .set_initial_image   = disk_set_initial_image,
+   .get_image_path      = disk_get_image_path,
+   .get_image_label     = disk_get_image_label,
 };
 
 static void disk_tray_open(void)
@@ -1105,6 +1250,85 @@ static void disk_tray_close(void)
    disk_ejected = 0;
 }
 
+static char base_dir[1024];
+
+static void extract_directory(char *buf, const char *path, size_t size)
+{
+   char *base;
+   strncpy(buf, path, size - 1);
+   buf[size - 1] = '\0';
+
+   base = strrchr(buf, '/');
+   if (!base)
+      base = strrchr(buf, '\\');
+
+   if (base)
+      *base = '\0';
+   else
+   {
+      buf[0] = '.';
+      buf[1] = '\0';
+   }
+}
+
+static void extract_basename(char *buf, const char *path, size_t size)
+{
+   const char *base = strrchr(path, '/');
+   if (!base)
+      base = strrchr(path, '\\');
+   if (!base)
+      base = path;
+
+   if (*base == '\\' || *base == '/')
+      base++;
+
+   strncpy(buf, base, size - 1);
+   buf[size - 1] = '\0';
+
+   char *ext = strrchr(buf, '.');
+   if (ext)
+      *ext = '\0';
+}
+
+static bool read_m3u(const char *file)
+{
+   char line[1024];
+   char name[PATH_MAX];
+   FILE *f = fopen(file, "r");
+   if (!f)
+      return false;
+
+   while (fgets(line, sizeof(line), f) && disk_count < sizeof(disks) / sizeof(disks[0]))
+   {
+      if (line[0] == '#')
+         continue;
+      char *carrige_return = strchr(line, '\r');
+      if (carrige_return)
+         *carrige_return = '\0';
+      char *newline = strchr(line, '\n');
+      if (newline)
+         *newline = '\0';
+
+      if (line[0] != '\0')
+      {
+         char disk_label[PATH_MAX];
+         disk_label[0] = '\0';
+
+         snprintf(name, sizeof(name), "%s%c%s", base_dir, SLASH, line);
+         disks[disk_count].fname = strdup(name);
+
+         get_disk_label(disk_label, name, PATH_MAX);
+         disks[disk_count].flabel = strdup(disk_label);
+
+         disk_count++;
+      }
+   }
+
+   fclose(f);
+   return (disk_count != 0);
+}
+
+/* end of multi disk support */
 
 static const char * const biosfiles_us[] = {
    "us_scd2_9306", "SegaCDBIOS9303", "us_scd1_9210", "bios_CD_U"
@@ -1198,6 +1422,9 @@ bool retro_load_game(const struct retro_game_info *info)
    static char carthw_path[256];
    size_t i;
 
+   unsigned int cd_index = 0;
+   bool is_m3u = (strcasestr(info->path, ".m3u") != NULL);
+
    struct retro_input_descriptor desc[] = {
       { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT,  "D-Pad Left" },
       { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "D-Pad Up" },
@@ -1268,14 +1495,48 @@ bool retro_load_game(const struct retro_game_info *info)
       }
    }
 
-   disk_current_index = 0;
-   disk_count = 1;
-   disks[0].fname = strdup(info->path);
+   disk_init();
+
+   extract_directory(base_dir, info->path, sizeof(base_dir));
+   
+   if (is_m3u)
+   {
+      if (!read_m3u(info->path))
+      {
+         log_cb(RETRO_LOG_INFO, "failed to read m3u file\n");
+         return false;
+      }
+   }
+   else
+   {
+      char disk_label[PATH_MAX];
+      disk_label[0] = '\0';
+
+      disk_current_index = 0;
+      disk_count = 1;
+      disks[0].fname = strdup(info->path);
+
+      get_disk_label(disk_label, info->path, PATH_MAX);
+      disks[0].flabel = strdup(disk_label);
+   }
+
+   /* If this is an M3U file, attempt to set the
+    * initial disk image */
+   if (is_m3u && (disk_current_index > 0) && (disk_current_index < disk_count))
+   {
+      const char *fname = disks[disk_current_index].fname;
+
+      if (fname && (*fname != '\0'))
+         if (strcmp(disk_initial_path, fname) == 0)
+            cd_index = disk_current_index;
+   }
 
    make_system_path(carthw_path, sizeof(carthw_path), "carthw", ".cfg");
 
-   media_type = PicoLoadMedia(info->path, carthw_path,
+   media_type = PicoLoadMedia(disks[cd_index].fname, carthw_path,
          find_bios, NULL);
+
+   disk_current_index = cd_index;
 
    switch (media_type) {
    case PM_BAD_DETECT:
@@ -1791,6 +2052,7 @@ void retro_run(void)
 
 void retro_init(void)
 {
+   unsigned dci_version = 0;
    struct retro_log_callback log;
    int level;
 
@@ -1806,6 +2068,13 @@ void retro_init(void)
 
    if (environ_cb(RETRO_ENVIRONMENT_GET_INPUT_BITMASKS, NULL))
       libretro_supports_bitmasks = true;
+
+   disk_initial_index = 0;
+   disk_initial_path[0] = '\0';
+   if (environ_cb(RETRO_ENVIRONMENT_GET_DISK_CONTROL_INTERFACE_VERSION, &dci_version) && (dci_version >= 1))
+      environ_cb(RETRO_ENVIRONMENT_SET_DISK_CONTROL_EXT_INTERFACE, &disk_control_ext);
+   else
+      environ_cb(RETRO_ENVIRONMENT_SET_DISK_CONTROL_INTERFACE, &disk_control);
 
 #ifdef _3DS
    ctr_svchack_successful = ctr_svchack_init();
@@ -1875,6 +2144,8 @@ void retro_deinit(void)
 #endif
    vout_buf = NULL;
    PicoExit();
+
+   disk_init();
 
    libretro_supports_bitmasks = false;
 }
