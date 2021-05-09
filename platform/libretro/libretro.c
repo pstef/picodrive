@@ -995,7 +995,6 @@ static char disk_initial_path[PATH_MAX];
 static struct disks_state {
    char *fname;
    char *flabel;
-   int internal_index;
 } disks[8];
 
 static void get_disk_label(char *disk_label, const char *disk_path, size_t len)
@@ -1040,7 +1039,6 @@ static void disk_init(void)
          free(disks[i].flabel);
          disks[i].flabel = NULL;
       }
-      disks[i].internal_index = 0;
    }
 }
 
@@ -1122,8 +1120,6 @@ static bool disk_replace_image_index(unsigned index,
    if (disks[index].flabel != NULL)
       free(disks[index].flabel);
    disks[index].flabel = NULL;
-
-   disks[index].internal_index = 0;
 
    if (info != NULL) {
       char disk_label[PATH_MAX];
