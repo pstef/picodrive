@@ -1523,13 +1523,13 @@ bool retro_load_game(const struct retro_game_info *info)
 
    /* If this is an M3U file, attempt to set the
     * initial disk image */
-   if (is_m3u && (disk_current_index > 0) && (disk_current_index < disk_count))
+   if (is_m3u && (disk_initial_index > 0) && (disk_initial_index < disk_count))
    {
-      const char *fname = disks[disk_current_index].fname;
+      const char *fname = disks[disk_initial_index].fname;
 
       if (fname && (*fname != '\0'))
          if (strcmp(disk_initial_path, fname) == 0)
-            cd_index = disk_current_index;
+            cd_index = disk_initial_index;
    }
 
    make_system_path(carthw_path, sizeof(carthw_path), "carthw", ".cfg");
