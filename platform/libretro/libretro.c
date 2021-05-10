@@ -90,6 +90,10 @@ static retro_audio_sample_batch_t audio_batch_cb;
 
 #define INITIAL_SND_RATE 44100
 
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
+
 static const float VOUT_PAR = 0.0;
 static const float VOUT_4_3 = (224.0f * (4.0f / 3.0f));
 static const float VOUT_CRT = (224.0f * 1.29911f);
