@@ -54,6 +54,7 @@ endif
 include $(COMMON_DIR)/common.mak
 
 SOURCES_C := $(LIBRETRO_DIR)/libretro.c \
+             $(LIBRETRO_COMM_DIR)/compat/compat_strcasestr.c \
              $(COMMON_DIR)/mp3.c \
              $(COMMON_DIR)/mp3_sync.c \
              $(COMMON_DIR)/mp3_dummy.c \
