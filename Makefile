@@ -312,7 +312,7 @@ clean:
 
 $(TARGET): $(OBJS)
 
-ifeq ($(STATIC_LINKING), 1)
+ifeq ($(STATIC_LINKING_LINK), 1)
 	$(AR) rcs $@ $^
 else
 	$(LD) $(LINKOUT)$@ $^ $(LDFLAGS) $(LDLIBS)
