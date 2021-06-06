@@ -1910,7 +1910,6 @@ void retro_run(void)
    bool updated = false;
    int pad, i;
    static void *buff;
-   int16_t input;
 
    PicoIn.skipFrame = 0;
 
@@ -1920,13 +1919,22 @@ void retro_run(void)
    input_poll_cb();
 
    PicoIn.pad[0] = PicoIn.pad[1] = 0;
-   for (pad = 0; pad < 2; pad++) {
-      if (libretro_supports_bitmasks) {
-         input = input_state_cb(pad, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_MASK);
+
+   if (libretro_supports_bitmasks)
+   {
+      for (pad = 0; pad < 2; pad++)
+      {
+         int16_t input = input_state_cb(
+               pad, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_MASK);
          for (i = 0; i < RETRO_PICO_MAP_LEN; i++)
             if (input & (1 << i))
                PicoIn.pad[pad] |= retro_pico_map[i];
-      } else {
+      }
+   }
+   else
+   {
+      for (pad = 0; pad < 2; pad++)
+      {
          for (i = 0; i < RETRO_PICO_MAP_LEN; i++)
             if (input_state_cb(pad, RETRO_DEVICE_JOYPAD, 0, i))
                PicoIn.pad[pad] |= retro_pico_map[i];
