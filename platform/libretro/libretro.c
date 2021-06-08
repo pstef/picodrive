@@ -727,9 +727,20 @@ void retro_set_environment(retro_environment_t cb)
    struct retro_vfs_interface_info vfs_iface_info;
 #endif
 
+   static const struct retro_system_content_info_override content_overrides[] = {
+      {
+         "gen|smd|md|32x|sms", /* extensions */
+         false,                /* need_fullpath */
+         false                 /* persistent_data */
+      },
+      { NULL, false, false }
+   };
+
    environ_cb = cb;
 
    libretro_set_core_options(environ_cb);
+   environ_cb(RETRO_ENVIRONMENT_SET_CONTENT_INFO_OVERRIDE,
+         (void*)content_overrides);
 
 #ifdef USE_LIBRETRO_VFS
    vfs_iface_info.required_interface_version = 1;
@@ -1419,12 +1430,27 @@ static void set_memory_maps(void)
 
 bool retro_load_game(const struct retro_game_info *info)
 {
+   const struct retro_game_info_ext *info_ext = NULL;
+   const unsigned char *content_data          = NULL;
+   size_t content_size                        = 0;
+   char content_path[PATH_MAX];
+   char content_ext[8];
+   char carthw_path[PATH_MAX];
    enum media_type_e media_type;
-   static char carthw_path[256];
    size_t i;
 
+#if defined(_WIN32)
+   char slash      = '\\';
+#else
+   char slash      = '/';
+#endif
+
+   content_path[0] = '\0';
+   content_ext[0]  = '\0';
+   carthw_path[0]  = '\0';
+
    unsigned int cd_index = 0;
-   bool is_m3u = (strcasestr(info->path, ".m3u") != NULL);
+   bool is_m3u           = false;
 
    struct retro_input_descriptor desc[] = {
       { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT,  "D-Pad Left" },
@@ -1476,6 +1502,61 @@ bool retro_load_game(const struct retro_game_info *info)
       { 0 },
    };
 
+   /* Attempt to fetch extended game info */
+   if (environ_cb(RETRO_ENVIRONMENT_GET_GAME_INFO_EXT, &info_ext))
+   {
+      content_data = (const char *)info_ext->data;
+      content_size = info_ext->size;
+
+      strncpy(base_dir, info_ext->dir, sizeof(base_dir));
+      base_dir[sizeof(base_dir) - 1] = '\0';
+
+      strncpy(content_ext, info_ext->ext, sizeof(content_ext));
+      content_ext[sizeof(content_ext) - 1] = '\0';
+
+      if (info_ext->file_in_archive)
+      {
+         /* We don't have a 'physical' file in this
+          * case, but the core still needs a filename
+          * in order to detect media type. We therefore
+          * fake it, using the content directory,
+          * canonical content name, and content file
+          * extension */
+         snprintf(content_path, sizeof(content_path), "%s%c%s.%s",
+               base_dir, slash, info_ext->name, content_ext);
+      }
+      else
+      {
+         strncpy(content_path, info_ext->full_path, sizeof(content_path));
+         content_path[sizeof(content_path) - 1] = '\0';
+      }
+   }
+   else
+   {
+      const char *ext = NULL;
+
+      if (!info || !info->path)
+      {
+         if (log_cb)
+            log_cb(RETRO_LOG_ERROR, "info->path required\n");
+         return false;
+      }
+
+      content_data = NULL;
+      content_size = 0;
+
+      extract_directory(base_dir, info->path, sizeof(base_dir));
+
+      strncpy(content_path, info->path, sizeof(content_path));
+      content_path[sizeof(content_path) - 1] = '\0';
+
+      if ((ext = strrchr(info->path, '.')))
+      {
+         strncpy(content_ext, ext + 1, sizeof(content_ext));
+         content_ext[sizeof(content_ext) - 1] = '\0';
+      }
+   }
+
    enum retro_pixel_format fmt = RETRO_PIXEL_FORMAT_RGB565;
    if (!environ_cb(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &fmt)) {
       if (log_cb)
@@ -1483,30 +1564,19 @@ bool retro_load_game(const struct retro_game_info *info)
       return false;
    }
 
-   if (info == NULL || info->path == NULL) {
-      if (log_cb)
-         log_cb(RETRO_LOG_ERROR, "info->path required\n");
-      return false;
-   }
-
-   for (i = 0; i < sizeof(disks) / sizeof(disks[0]); i++) {
-      if (disks[i].fname != NULL) {
-         free(disks[i].fname);
-         disks[i].fname = NULL;
-      }
-   }
-
    disk_init();
 
-   extract_directory(base_dir, info->path, sizeof(base_dir));
-   
+   is_m3u = (strcasestr(content_ext, "m3u") != NULL);
    if (is_m3u)
    {
-      if (!read_m3u(info->path))
+      if (!read_m3u(content_path))
       {
          log_cb(RETRO_LOG_INFO, "failed to read m3u file\n");
          return false;
       }
+
+      strncpy(content_path, disks[0].fname, sizeof(content_path));
+      content_path[sizeof(content_path) - 1] = '\0';
    }
    else
    {
@@ -1515,9 +1585,9 @@ bool retro_load_game(const struct retro_game_info *info)
 
       disk_current_index = 0;
       disk_count = 1;
-      disks[0].fname = strdup(info->path);
+      disks[0].fname = strdup(content_path);
 
-      get_disk_label(disk_label, info->path, PATH_MAX);
+      get_disk_label(disk_label, content_path, PATH_MAX);
       disks[0].flabel = strdup(disk_label);
    }
 
@@ -1530,12 +1600,21 @@ bool retro_load_game(const struct retro_game_info *info)
       if (fname && (*fname != '\0'))
          if (strcmp(disk_initial_path, fname) == 0)
             cd_index = disk_initial_index;
+
+      /* If we are not loading the first disk in the
+       * M3U list, update the content_path string
+       * that will be passed to PicoLoadMedia() */
+      if (cd_index != 0)
+      {
+         strncpy(content_path, disks[cd_index].fname, sizeof(content_path));
+         content_path[sizeof(content_path) - 1] = '\0';
+      }
    }
 
    make_system_path(carthw_path, sizeof(carthw_path), "carthw", ".cfg");
 
-   media_type = PicoLoadMedia(disks[cd_index].fname, carthw_path,
-         find_bios, NULL);
+   media_type = PicoLoadMedia(content_path, content_data, content_size,
+         carthw_path, find_bios, NULL);
 
    disk_current_index = cd_index;
 
