@@ -1505,7 +1505,7 @@ bool retro_load_game(const struct retro_game_info *info)
    /* Attempt to fetch extended game info */
    if (environ_cb(RETRO_ENVIRONMENT_GET_GAME_INFO_EXT, &info_ext))
    {
-      content_data = (const char *)info_ext->data;
+      content_data = (const unsigned char *)info_ext->data;
       content_size = info_ext->size;
 
       strncpy(base_dir, info_ext->dir, sizeof(base_dir));
