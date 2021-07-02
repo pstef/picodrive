@@ -587,7 +587,7 @@ void emu_prep_defconfig(void)
 	memset(&defaultConfig, 0, sizeof(defaultConfig));
 	defaultConfig.EmuOpt    = EOPT_EN_SRAM | EOPT_EN_SOUND | EOPT_16BPP |
 				  EOPT_EN_CD_LEDS | EOPT_GZIP_SAVES | 0x10/*?*/;
-	defaultConfig.s_PicoOpt = POPT_EN_SNDFILTER|
+	defaultConfig.s_PicoOpt = POPT_EN_SNDFILTER|POPT_EN_YM2413|
 				  POPT_EN_STEREO|POPT_EN_FM|POPT_EN_PSG|POPT_EN_Z80 |
 				  POPT_EN_MCD_PCM|POPT_EN_MCD_CDDA|POPT_EN_MCD_GFX |
 				  POPT_EN_DRC|POPT_ACC_SPRITES |
@@ -1358,6 +1358,7 @@ static void emu_loop_prep(void)
 /* our tick here is 1 us right now */
 #define ms_to_ticks(x) (unsigned int)(x * 1000)
 #define get_ticks() plat_get_ticks_us()
+#define vsync_delay_x3	3*ms_to_ticks(1)
 
 void emu_loop(void)
 {
@@ -1512,13 +1513,13 @@ void emu_loop(void)
 			diff = timestamp_aim_x3 - timestamp * 3;
 
 			// sleep or vsync if we are still too fast
-			if (diff > target_frametime_x3 && (currentConfig.EmuOpt & EOPT_VSYNC)) {
+			if (diff > target_frametime_x3 + vsync_delay_x3 && (currentConfig.EmuOpt & EOPT_VSYNC)) {
 				// we are too fast
 				plat_video_wait_vsync();
 				timestamp = get_ticks();
 				diff = timestamp * 3 - timestamp_aim_x3;
 			}
-			if (diff > target_frametime_x3) {
+			if (diff > target_frametime_x3 + vsync_delay_x3) {
 				// still too fast
 				plat_wait_till_us(timestamp + (diff - target_frametime_x3) / 3);
 			}

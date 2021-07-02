@@ -68,7 +68,6 @@
 // 200 - compare trace
 // 400 - block entry backtrace on exit
 // 800 - state dump on exit
-// {
 #ifndef DRC_DEBUG
 #define DRC_DEBUG 0//x847
 #endif
@@ -218,7 +217,7 @@ static void REGPARM(3) *sh2_drc_log_entry(void *block, SH2 *sh2, u32 sr)
   if (block != NULL) {
 #if defined PDB
     dbg(8, "= %csh2 enter %08x %p, c=%d", sh2->is_slave?'s':'m',
-      sh2->pc, block, (signed int)sr >> 12);
+      sh2->pc, block, ((signed int)sr >> 12)+1);
     pdb_step(sh2, sh2->pc);
 #elif (DRC_DEBUG & 8)
     if (lastpc != sh2->pc) {
@@ -763,6 +762,7 @@ static void rm_from_hashlist(struct block_entry *be, int tcache_id)
 }
 
 
+#if LINK_BRANCHES
 static void add_to_hashlist_unresolved(struct block_link *bl, int tcache_id)
 {
   u32 tcmask = HASH_TABLE_SIZE(tcache_id) - 1;
@@ -805,7 +805,6 @@ static void rm_from_hashlist_unresolved(struct block_link *bl, int tcache_id)
     bl->next->prev = bl->prev;
 }
 
-#if LINK_BRANCHES
 static void dr_block_link(struct block_entry *be, struct block_link *bl, int emit_jump)
 {
   dbg(2, "- %slink from %p to pc %08x entry %p", emit_jump ? "":"early ",
@@ -1033,23 +1032,23 @@ static void dr_rm_block_entry(struct block_desc *bd, int tcache_id, u32 nolit, i
     return;
   }
 
-#if LINK_BRANCHES
   // remove from hash table, make incoming links unresolved
   if (bd->active) {
     for (i = 0; i < bd->entry_count; i++) {
       rm_from_hashlist(&bd->entryp[i], tcache_id);
 
+#if LINK_BRANCHES
       while ((bl = bd->entryp[i].links) != NULL) {
         dr_block_unlink(bl, 1);
         add_to_hashlist_unresolved(bl, tcache_id);
       }
+#endif
     }
 
     dr_mark_memory(-1, bd, tcache_id, nolit);
     add_to_block_list(&inactive_blocks[tcache_id], bd);
   }
   bd->active = 0;
-#endif
 
   if (free) {
 #if LINK_BRANCHES
@@ -1069,7 +1068,6 @@ static void dr_rm_block_entry(struct block_desc *bd, int tcache_id, u32 nolit, i
     rm_from_block_lists(bd);
     bd->addr = bd->size = bd->addr_lit = bd->size_lit = 0;
     bd->entry_count = 0;
-    bd->entryp = NULL;
   }
   emith_update_cache();
 }
@@ -2613,10 +2611,14 @@ static uptr split_address(uptr la, uptr mask, s32 *offs)
   uptr sign = (mask>>1) + 1; // sign bit in offset
   *offs = (la & mask) | (la & sign ? ~mask : 0); // offset part, sign extended
   la = (la & ~mask) + ((la & sign) << 1); // base part, corrected for offs sign
-  if (~mask && la == ~mask && !(*offs & sign)) { // special case la=-1 & offs>0
-    *offs = -*offs;
-    la = 0;
+#ifdef __arm__
+  // arm32 offset has an add/sub flag and an unsigned 8 bit value, which only
+  // allows values of [-255...255]. the value -256 thus can't be used.
+  if (*offs + sign == 0) {
+    la += sign;
+    *offs += sign;
   }
+#endif
   return la;
 }
 
@@ -2677,8 +2679,9 @@ static int emit_get_rbase_and_offs(SH2 *sh2, sh2_reg_e r, int rmode, s32 *offs)
     // known fixed host address
     la = split_address(la + ((a + *offs) & mask), omask, offs);
     if (la == 0) {
-      la = *offs;
-      *offs = 0;
+      // offset only. optimize for hosts having short indexed addressing
+      la = *offs & ~0x7f;  // keep the lower bits for endianess handling
+      *offs &= 0x7f;
     }
     hr = rcache_get_tmp();
     emith_move_r_ptr_imm(hr, la);
@@ -4414,6 +4417,7 @@ static void REGPARM(2) *sh2_translate(SH2 *sh2, int tcache_id)
           EMITH_HINT_COND(DCOND_EQ);
           emith_subf_r_r_imm(tmp, tmp2, 1);
           emith_set_t_cond(sr, DCOND_EQ);
+          emith_or_r_imm(sr, SH2_NO_POLLING);
           goto end_op;
         }
         goto default_;
@@ -5013,7 +5017,7 @@ end_op:
         // can't resolve branch locally, make a block exit
         bl = dr_prepare_ext_branch(block->entryp, target_pc, sh2->is_slave, tcache_id);
         if (cond != -1) {
-#if 1
+#ifndef __arm__
           if (bl && blx_target_count < ARRAY_SIZE(blx_targets)) {
             // conditional jumps get a blx stub for the far jump
             bl->type = BL_JCCBLX;
