@@ -446,6 +446,22 @@ else ifeq ($(platform), emscripten)
 
 	STATIC_LINKING = 1
 
+# RS90
+else ifeq ($(platform), rs90)
+	TARGET := $(TARGET_NAME)_libretro.so
+ifeq (,$(shell command -v $(RS90_PREFIX)mipsel-rs90-linux-uclibc-gcc 2>/dev/null))
+	# locate the toolchain for buildbot if it isn't in path or prefix not set
+	RS90_PREFIX = /opt/rs90-toolchain/usr/bin/
+endif
+	CC = $(RS90_PREFIX)mipsel-linux-gcc
+	AR = $(RS90_PREFIX)mipsel-linux-ar
+	SHARED := -shared -nostdlib
+	fpic := -fPIC
+	LIBM :=
+	CFLAGS += -fomit-frame-pointer -ffast-math -march=mips32 -mtune=mips32 -D__GCW0__
+	# clear_cache uses SYNCI instead of a syscall
+	CFLAGS += -DMIPS_USE_SYNCI
+
 # GCW0
 else ifeq ($(platform), gcw0)
 	TARGET := $(TARGET_NAME)_libretro.so
