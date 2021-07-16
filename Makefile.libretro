@@ -36,6 +36,7 @@ CFLAGS += -I platform/libretro/libretro-common/include/vfs
 
 STATIC_LINKING:= 0
 STATIC_LINKING_LINK:= 0
+LOW_MEMORY := 0
 TARGET_NAME := picodrive
 LIBM := -lm
 GIT_VERSION ?= $(shell git rev-parse --short HEAD || echo unknown)
@@ -461,6 +462,7 @@ endif
 	CFLAGS += -fomit-frame-pointer -ffast-math -march=mips32 -mtune=mips32 -D__GCW0__
 	# clear_cache uses SYNCI instead of a syscall
 	CFLAGS += -DMIPS_USE_SYNCI
+	LOW_MEMORY = 1
 
 # GCW0
 else ifeq ($(platform), gcw0)
@@ -595,6 +597,10 @@ endif
 
 ifeq ($(NO_MMAP),1)
 	CFLAGS += -DNO_MMAP
+endif
+
+ifeq ($(LOW_MEMORY), 1)
+	CFLAGS += -DLOW_MEMORY
 endif
 
 ifeq ($(NO_ARM_ASM),1)
