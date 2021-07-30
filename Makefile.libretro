@@ -479,7 +479,23 @@ endif
 	CFLAGS += -fomit-frame-pointer -ffast-math -march=mips32 -mtune=mips32r2 -mhard-float -D__GCW0__
 	# clear_cache uses SYNCI instead of a syscall
 	CFLAGS += -DMIPS_USE_SYNCI
-
+	
+# RETROFW
+else ifeq ($(platform), retrofw)
+	TARGET := $(TARGET_NAME)_libretro.so
+ifeq (,$(shell command -v $(GCW0_PREFIX)mipsel-gcw0-linux-uclibc-gcc 2>/dev/null))
+	# locate the toolchain for buildbot if it isn't in path or prefix not set
+	GCW0_PREFIX = /opt/retrofw-toolchain/usr/bin/
+endif
+	CC = $(GCW0_PREFIX)mipsel-linux-gcc
+	AR = $(GCW0_PREFIX)mipsel-linux-ar
+	SHARED := -shared -nostdlib
+	fpic := -fPIC
+	LIBM :=
+	CFLAGS += -fomit-frame-pointer -ffast-math -march=mips32 -mtune=mips32 -mhard-float -D__GCW0__
+	# clear_cache uses SYNCI instead of a syscall
+	CFLAGS += -DMIPS_USE_SYNCI
+	
 # Windows MSVC 2017 all architectures
 else ifneq (,$(findstring windows_msvc2017,$(platform)))
 	NO_GCC := 1
