@@ -111,7 +111,6 @@ static int vout_format = PDF_RGB555;
 static void *vout_buf;
 static int vout_width, vout_height, vout_offset;
 static float user_vout_width = 0.0;
-static int left_border = 0;
 
 #if defined(RENDER_GSKIT_PS2)
 #define VOUT_8BIT_WIDTH 328
@@ -1967,17 +1966,6 @@ static void update_variables(bool first_run)
          environ_cb(RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO, &av_info);
       }
    }
-   
-   var.value = NULL;
-   var.key = "picodrive_left_border";
-   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
-      if (strcmp(var.value, "Disabled") == 0)
-         left_border = 0;
-      else if (strcmp(var.value, "Left Border") == 0)
-         left_border = 1;
-      else if (strcmp(var.value, "Left & Right Borders") == 0)
-         left_border = 2;
-      }
 
    /* setup video if required */
    if (show_overscan != old_show_overscan || vout_format != old_vout_format)
@@ -2148,12 +2136,7 @@ void retro_run(void)
    buff = (char*)vout_buf + vout_offset;
 #endif
 
-	if ((left_border == 1) && (PicoIn.AHW & PAHW_SMS) && (Pico.video.reg[0] & 0x20))
-		video_cb((short *)buff + 8, vout_width - 8, vout_height, vout_width * 2);
-	else if ((left_border == 2) && (PicoIn.AHW & PAHW_SMS) && (Pico.video.reg[0] & 0x20))
-		video_cb((short *)buff + 8, vout_width - 16, vout_height, vout_width * 2);
-	else
-		video_cb((short *)buff, vout_width, vout_height, vout_width * 2);
+	video_cb((short *)buff, vout_width, vout_height, vout_width * 2);
 }
 
 void retro_init(void)
