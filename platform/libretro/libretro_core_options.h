@@ -262,19 +262,6 @@ struct retro_core_option_definition option_defs_us[] = {
       },
       "44100"
    },
-   {
-      "picodrive_left_border",
-      "Hide Master System Side Borders",
-      "Cuts off 8 pixels from either the left side of the screen, or both left and right sides when running Master System games.",
-      {
-         { "Disabled", NULL },
-         { "Left Border", NULL },
-         { "Left & Right Borders", NULL },
-         { NULL, NULL },
-      },
-      "Disabled"
-   },
-   { NULL, NULL, NULL, {{0}}, NULL },
 };
 
 /*
