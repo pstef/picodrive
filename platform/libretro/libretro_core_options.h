@@ -262,6 +262,7 @@ struct retro_core_option_definition option_defs_us[] = {
       },
       "44100"
    },
+   { NULL, NULL, NULL, {{0}}, NULL },
 };
 
 /*
