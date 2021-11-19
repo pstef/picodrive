@@ -20,7 +20,7 @@ uptr m68k_read16_map [0x1000000 >> M68K_MEM_SHIFT];
 uptr m68k_write8_map [0x1000000 >> M68K_MEM_SHIFT];
 uptr m68k_write16_map[0x1000000 >> M68K_MEM_SHIFT];
 
-static void xmap_set(uptr *map, int shift, int start_addr, int end_addr,
+static void xmap_set(uptr *map, int shift, u32 start_addr, u32 end_addr,
     const void *func_or_mh, int is_func)
 {
 #ifdef __clang__
@@ -53,13 +53,17 @@ static void xmap_set(uptr *map, int shift, int start_addr, int end_addr,
   }
 }
 
-void z80_map_set(uptr *map, int start_addr, int end_addr,
+void z80_map_set(uptr *map, u16 start_addr, u16 end_addr,
     const void *func_or_mh, int is_func)
 {
   xmap_set(map, Z80_MEM_SHIFT, start_addr, end_addr, func_or_mh, is_func);
+#ifdef _USE_CZ80
+  if (!is_func)
+    Cz80_Set_Fetch(&CZ80, start_addr, end_addr, (FPTR)func_or_mh);
+#endif
 }
 
-void cpu68k_map_set(uptr *map, int start_addr, int end_addr,
+void cpu68k_map_set(uptr *map, u32 start_addr, u32 end_addr,
     const void *func_or_mh, int is_func)
 {
   xmap_set(map, M68K_MEM_SHIFT, start_addr, end_addr, func_or_mh, is_func);
@@ -77,7 +81,7 @@ void cpu68k_map_set(uptr *map, int start_addr, int end_addr,
 }
 
 // more specialized/optimized function (does same as above)
-void cpu68k_map_all_ram(int start_addr, int end_addr, void *ptr, int is_sub)
+void cpu68k_map_all_ram(u32 start_addr, u32 end_addr, void *ptr, int is_sub)
 {
   uptr *r8map, *r16map, *w8map, *w16map;
   uptr addr = (uptr)ptr;
@@ -135,7 +139,7 @@ static void m68k_unmapped_write16(u32 a, u32 d)
   elprintf(EL_UIO, "m68k unmapped w16 [%06x] %04x @%06x", a, d & 0xffff, SekPc);
 }
 
-void m68k_map_unmap(int start_addr, int end_addr)
+void m68k_map_unmap(u32 start_addr, u32 end_addr)
 {
 #ifdef __clang__
   // workaround bug (segfault) in 
@@ -394,24 +398,15 @@ void NOINLINE ctl_write_z80reset(u32 d)
   }
 }
 
-static int get_scanline(int is_from_z80);
-
 static void psg_write_68k(u32 d)
 {
-  // look for volume write and update if needed
-  if ((d & 0x90) == 0x90)
-    PsndDoPSG(Pico.m.scanline);
-
+  PsndDoPSG(z80_cycles_from_68k());
   SN76496Write(d);
 }
 
 static void psg_write_z80(u32 d)
 {
-  if ((d & 0x90) == 0x90) {
-    int scanline = get_scanline(1);
-    PsndDoPSG(scanline);
-  }
-
+  PsndDoPSG(z80_cyclesDone());
   SN76496Write(d);
 }
 
@@ -772,12 +767,13 @@ PICO_INTERNAL void PicoMemSetup(void)
   // align to bank size. We know ROM loader allocated enough for this
   mask = (1 << M68K_MEM_SHIFT) - 1;
   rs = (Pico.romsize + mask) & ~mask;
+  if (rs > 0x400000) rs = 0x400000; // max cartridge area
   cpu68k_map_set(m68k_read8_map,  0x000000, rs - 1, Pico.rom, 0);
   cpu68k_map_set(m68k_read16_map, 0x000000, rs - 1, Pico.rom, 0);
 
   // Common case of on-cart (save) RAM, usually at 0x200000-...
   if ((Pico.sv.flags & SRF_ENABLED) && Pico.sv.data != NULL) {
-    sstart = Pico.sv.start;
+    sstart = Pico.sv.start & ~mask;
     rs = Pico.sv.end - sstart;
     rs = (rs + mask) & ~mask;
     if (sstart + rs >= 0x1000000)
@@ -1298,8 +1294,6 @@ static void z80_mem_setup(void)
   drZ80.z80_out = z80_md_out;
 #endif
 #ifdef _USE_CZ80
-  Cz80_Set_Fetch(&CZ80, 0x0000, 0x1fff, (FPTR)PicoMem.zram); // main RAM
-  Cz80_Set_Fetch(&CZ80, 0x2000, 0x3fff, (FPTR)PicoMem.zram); // mirror
   Cz80_Set_INPort(&CZ80, z80_md_in);
   Cz80_Set_OUTPort(&CZ80, z80_md_out);
 #endif

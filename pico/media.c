@@ -35,8 +35,8 @@ static int detect_media(const char *fname, const unsigned char *rom, unsigned in
 {
   static const short sms_offsets[] = { 0x7ff0, 0x3ff0, 0x1ff0 };
   static const char *sms_exts[] = { "sms", "gg", "sg" };
-  static const char *md_exts[] = { "gen", "bin", "smd" };
-  char buff0[32], buff[32];
+  static const char *md_exts[] = { "gen", "smd" };
+  char buff0[512], buff[32];
   unsigned short *d16 = NULL;
   pm_file *pmf = NULL;
   const char *ext_ptr = NULL;
@@ -66,14 +66,14 @@ static int detect_media(const char *fname, const unsigned char *rom, unsigned in
   }
 
   if (!rom) {
-    if (pm_read(buff0, 32, pmf) != 32) {
+    if (pm_read(buff0, 512, pmf) != 512) {
       pm_close(pmf);
       return PM_BAD_DETECT;
     }
   } else {
-    if (romsize < 32)
+    if (romsize < 512)
       return PM_BAD_DETECT;
-    memcpy(buff0, rom, 32);
+    memcpy(buff0, rom, 512);
   }
 
   if (strncasecmp("SEGADISCSYSTEM", buff0 + 0x00, 14) == 0 ||
@@ -146,6 +146,11 @@ extension_check:
   d16 = (unsigned short *)(buff0 + 4);
   if ((((d16[0] << 16) | d16[1]) & 0xffffff) >= romsize) {
     lprintf("bad MD reset vector, assuming SMS\n");
+    goto looks_like_sms;
+  }
+  d16 = (unsigned short *)(buff0 + 0x1a0);
+  if ((((d16[0] << 16) | d16[1]) & 0xffffff) != 0) {
+    lprintf("bad MD rom start, assuming SMS\n");
     goto looks_like_sms;
   }
 
@@ -281,7 +286,6 @@ enum media_type_e PicoLoadMedia(const char *filename,
     }
   }
   else if (media_type == PM_MARK3) {
-    lprintf("detected SMS ROM\n");
     PicoIn.AHW = PAHW_SMS;
   }
 
@@ -295,7 +299,6 @@ enum media_type_e PicoLoadMedia(const char *filename,
   }
 
   ret = PicoCartLoad(rom_file, rom, romsize, &rom_data, &rom_size, (PicoIn.AHW & PAHW_SMS) ? 1 : 0);
-  pm_close(rom_file);
   if (ret != 0) {
     if      (ret == 2) lprintf("Out of memory\n");
     else if (ret == 3) lprintf("Read failed\n");
@@ -332,9 +335,18 @@ enum media_type_e PicoLoadMedia(const char *filename,
     goto out;
   }
   rom_data = NULL; // now belongs to PicoCart
-  Pico.m.ncart_in = 0;
+
+  // simple test for GG. Do this here since m.hardware is nulled in Insert
+  if (PicoIn.AHW & PAHW_SMS) {
+    if (!strcmp(rom_file->ext,"gg") && !PicoIn.hwSelect) {
+      Pico.m.hardware |= 0x1;
+      lprintf("detected GG ROM\n");
+    } else
+      lprintf("detected SMS ROM\n");
+  }
 
   // insert CD if it was detected
+  Pico.m.ncart_in = 0;
   if (cd_img_type != CT_UNKNOWN) {
     ret = cdd_load(filename, cd_img_type);
     if (ret != 0) {
@@ -349,6 +361,8 @@ enum media_type_e PicoLoadMedia(const char *filename,
     PicoSetInputDevice(0, PICO_INPUT_PAD_6BTN);
 
 out:
+  if (rom_file)
+    pm_close(rom_file);
   if (rom_data)
     free(rom_data);
   return media_type;
