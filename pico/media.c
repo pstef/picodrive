@@ -338,7 +338,16 @@ enum media_type_e PicoLoadMedia(const char *filename,
 
   // simple test for GG. Do this here since m.hardware is nulled in Insert
   if (PicoIn.AHW & PAHW_SMS) {
-    if (!strcmp(rom_file->ext,"gg") && !PicoIn.hwSelect) {
+    const char *ext = NULL;
+    if (rom_file && rom_file->ext && (*rom_file->ext != '\0')) {
+      ext = rom_file->ext;
+    }
+    else if ((ext = strrchr(filename, '.'))) {
+      if (*(++ext) == '\0') {
+        ext = NULL;
+      }
+    }
+    if (ext && !strcmp(ext,"gg") && !PicoIn.hwSelect) {
       Pico.m.hardware |= 0x1;
       lprintf("detected GG ROM\n");
     } else
