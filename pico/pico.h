@@ -224,6 +224,7 @@ void PicoDoHighPal555(int sh, int line, struct PicoEState *est);
 #define PDRAW_BORDER_32     (1<<9) // center H32 in buffer (32 px border)
 #define PDRAW_SKIP_FRAME   (1<<10) // frame is skipped
 #define PDRAW_30_ROWS      (1<<11) // 30 rows mode (240 lines)
+#define PDRAW_32X_SCALE    (1<<12) // scale CLUT layer for 32X
 extern int rendstatus_old;
 extern int rendlines;
 
@@ -309,6 +310,8 @@ enum input_device {
   PICO_INPUT_NOTHING,
   PICO_INPUT_PAD_3BTN,
   PICO_INPUT_PAD_6BTN,
+  PICO_INPUT_PAD_TEAM,
+  PICO_INPUT_PAD_4WAY,
 };
 void PicoSetInputDevice(int port, enum input_device device);
 
