@@ -15,12 +15,10 @@
 #include <stdarg.h>
 #include <string.h>
 #ifndef _WIN32
-#ifndef NO_MMAP
 #ifdef __SWITCH__
 #include "switch/mman.h"
 #else
 #include <sys/mman.h>
-#endif
 #endif
 #else
 #include <io.h>
@@ -30,10 +28,6 @@
 #include <errno.h>
 #ifdef __MACH__
 #include <libkern/OSCacheControl.h>
-#endif
-
-#ifdef USE_LIBRETRO_VFS
-#include "file_stream_transforms.h"
 #endif
 
 #if defined(RENDER_GSKIT_PS2)
@@ -360,30 +354,6 @@ static void munmap(void *addr, size_t length)
    UnmapViewOfFile(addr);
    /* ruh-ro, we leaked handle from CreateFileMapping() ... */
 }
-#elif defined(NO_MMAP)
-#define PROT_EXEC   0x04
-#define MAP_FAILED 0
-#define PROT_READ 0
-#define PROT_WRITE 0
-#define MAP_PRIVATE 0
-#define MAP_ANONYMOUS 0
-
-void* mmap(void *desired_addr, size_t len, int mmap_prot, int mmap_flags, int fildes, size_t off)
-{
-   return calloc(1, len);
-}
-
-void munmap(void *base_addr, size_t len)
-{
-   free(base_addr);
-}
-
-int mprotect(void *addr, size_t len, int prot)
-{
-   /* stub - not really needed at this point since this codepath has no dynarecs */
-   return 0;
-}
-
 #endif
 
 #ifndef MAP_ANONYMOUS
@@ -903,9 +873,14 @@ int state_fseek(void *file, long offset, int whence)
 size_t retro_serialize_size(void)
 {
    struct savestate_state state = { 0, };
+   unsigned AHW = PicoIn.AHW;
    int ret;
 
+   /* we need the max possible size here, so include 32X for MD and MCD */
+   if (!(AHW & (PAHW_SMS|PAHW_PICO|PAHW_SVP)))
+      PicoIn.AHW |= PAHW_32X;
    ret = PicoStateFP(&state, 1, NULL, state_skip, NULL, state_fseek);
+   PicoIn.AHW = AHW;
    if (ret != 0)
       return 0;
 
@@ -1485,9 +1460,6 @@ bool retro_load_game(const struct retro_game_info *info)
       { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R,     "Z" },
       { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT,"Mode" },
       { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "Start" },
-      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L2,    "Previous page (Pico)" },
-      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R2,    "Next page (Pico)" },
-      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L3,    "Switch input (Pico)" },
 
       { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT,  "D-Pad Left" },
       { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "D-Pad Up" },
@@ -1501,9 +1473,34 @@ bool retro_load_game(const struct retro_game_info *info)
       { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R,     "Z" },
       { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT,"Mode" },
       { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "Start" },
-      { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L2,    "Previous page (Pico)" },
-      { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R2,    "Next page (Pico)" },
-      { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L3,    "Switch input (Pico)" },
+
+
+      { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT,  "D-Pad Left" },
+      { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "D-Pad Up" },
+      { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN,  "D-Pad Down" },
+      { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT, "D-Pad Right" },
+      { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B,     "B" },
+      { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A,     "C" },
+      { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_X,     "Y" },
+      { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Y,     "A" },
+      { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L,     "X" },
+      { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R,     "Z" },
+      { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT,"Mode" },
+      { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "Start" },
+
+
+      { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT,  "D-Pad Left" },
+      { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "D-Pad Up" },
+      { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN,  "D-Pad Down" },
+      { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT, "D-Pad Right" },
+      { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B,     "B" },
+      { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A,     "C" },
+      { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_X,     "Y" },
+      { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Y,     "A" },
+      { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L,     "X" },
+      { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R,     "Z" },
+      { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT,"Mode" },
+      { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "Start" },
 
       { 0 },
    };
@@ -1524,6 +1521,20 @@ bool retro_load_game(const struct retro_game_info *info)
       { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B,     "Button 1 Start" },
       { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A,     "Button 2" },
       { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "Button Pause" },
+
+      { 0 },
+   };
+
+   struct retro_input_descriptor desc_pico[] = {
+      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT,  "D-Pad Left (violet)" },
+      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "D-Pad Up (white)" },
+      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN,  "D-Pad Down (orange)" },
+      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT, "D-Pad Right (green)" },
+      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B,     "Red Button" },
+      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A,     "Pen Button" },
+      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT,"Switch input" },
+      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L,     "Previous page" },
+      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R,     "Next page" },
 
       { 0 },
    };
@@ -1663,7 +1674,9 @@ bool retro_load_game(const struct retro_game_info *info)
       break;
    }
 
-   if (media_type == PM_MARK3)
+   if (PicoIn.AHW & PAHW_PICO)
+      environ_cb(RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS, desc_pico);
+   else if (PicoIn.AHW & PAHW_SMS)
       environ_cb(RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS, desc_sms);
    else
       environ_cb(RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS, desc);
@@ -1786,6 +1799,8 @@ static const unsigned short retro_pico_map[] = {
 };
 #define RETRO_PICO_MAP_LEN (sizeof(retro_pico_map) / sizeof(retro_pico_map[0]))
 
+static int has_4_pads;
+
 static void snd_write(int len)
 {
    audio_batch_cb(PicoIn.sndOut, len / 4);
@@ -1797,6 +1812,10 @@ static enum input_device input_name_to_val(const char *name)
       return PICO_INPUT_PAD_3BTN;
    if (strcmp(name, "6 button pad") == 0)
       return PICO_INPUT_PAD_6BTN;
+   if (strcmp(name, "team player") == 0)
+      return PICO_INPUT_PAD_TEAM;
+   if (strcmp(name, "4way play") == 0)
+      return PICO_INPUT_PAD_4WAY;
    if (strcmp(name, "None") == 0)
       return PICO_INPUT_NOTHING;
 
@@ -1818,8 +1837,11 @@ static void update_variables(bool first_run)
 
    var.value = NULL;
    var.key = "picodrive_input1";
-   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
-      PicoSetInputDevice(0, input_name_to_val(var.value));
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
+      int input = input_name_to_val(var.value);
+      PicoSetInputDevice(0, input);
+      has_4_pads = input == PICO_INPUT_PAD_TEAM || input == PICO_INPUT_PAD_4WAY;
+   }
 
    var.value = NULL;
    var.key = "picodrive_input2";
@@ -2082,7 +2104,7 @@ void run_events_pico(unsigned int events)
 {
     int lim_x;
 
-    if (events & (1 << RETRO_DEVICE_ID_JOYPAD_L3)) {
+    if (events & (1 << RETRO_DEVICE_ID_JOYPAD_SELECT)) {
 	pico_inp_mode++;
 	if (pico_inp_mode > 2)
 	    pico_inp_mode = 0;
@@ -2094,13 +2116,13 @@ void run_events_pico(unsigned int events)
 	    break;
 	}
     }
-    if (events & (1 << RETRO_DEVICE_ID_JOYPAD_L2)) {
+    if (events & (1 << RETRO_DEVICE_ID_JOYPAD_L)) {
 	PicoPicohw.page--;
 	if (PicoPicohw.page < 0)
 	    PicoPicohw.page = 0;
 	emu_status_msg("Page %i", PicoPicohw.page);
     }
-    if (events & (1 << RETRO_DEVICE_ID_JOYPAD_R2)) {
+    if (events & (1 << RETRO_DEVICE_ID_JOYPAD_R)) {
 	PicoPicohw.page++;
 	if (PicoPicohw.page > 6)
 	    PicoPicohw.page = 6;
@@ -2137,7 +2159,7 @@ void run_events_pico(unsigned int events)
 void retro_run(void)
 {
    bool updated = false;
-   int pad, i;
+   int pad, i, padcount;
    static void *buff;
 
    PicoIn.skipFrame = 0;
@@ -2147,13 +2169,19 @@ void retro_run(void)
 
    input_poll_cb();
 
-   PicoIn.pad[0] = PicoIn.pad[1] = 0;
+   PicoIn.pad[0] = PicoIn.pad[1] = PicoIn.pad[2] = PicoIn.pad[3] = 0;
+   if (PicoIn.AHW & PAHW_PICO)
+      padcount = 1;
+   else if (PicoIn.AHW & PAHW_SMS)
+      padcount = 2;
+   else
+      padcount = has_4_pads ? 4 : 2;
 
-   int16_t input[2] = {0, 0};
+   int16_t input[4] = {0, 0};
 
    if (libretro_supports_bitmasks)
    {
-      for (pad = 0; pad < 2; pad++)
+      for (pad = 0; pad < padcount; pad++)
       {
          input[pad] = input_state_cb(
                pad, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_MASK);
@@ -2161,21 +2189,21 @@ void retro_run(void)
    }
    else
    {
-      for (pad = 0; pad < 2; pad++)
+      for (pad = 0; pad < padcount; pad++)
       {
-         for (i = 0; i < 16; i++)
+         for (i = 0; i < RETRO_PICO_MAP_LEN; i++)
             if (input_state_cb(pad, RETRO_DEVICE_JOYPAD, 0, i))
                input[pad] |= 1 << i;
       }
    }
 
-   for (pad = 0; pad < 2; pad++)
+   for (pad = 0; pad < padcount; pad++)
      for (i = 0; i < RETRO_PICO_MAP_LEN; i++)
 	 if (input[pad] & (1 << i))
 	     PicoIn.pad[pad] |= retro_pico_map[i];
 
    if (PicoIn.AHW == PAHW_PICO) {
-       uint16_t ev = (input[0] | input[1]) & ((1 << RETRO_DEVICE_ID_JOYPAD_L2) | (1 << RETRO_DEVICE_ID_JOYPAD_R2) | (1 << RETRO_DEVICE_ID_JOYPAD_L3));
+       uint16_t ev = input[0] & ((1 << RETRO_DEVICE_ID_JOYPAD_L) | (1 << RETRO_DEVICE_ID_JOYPAD_R) | (1 << RETRO_DEVICE_ID_JOYPAD_SELECT));
        uint16_t new_ev = ev & ~pico_events;
        pico_events = ev;
        run_events_pico(new_ev);

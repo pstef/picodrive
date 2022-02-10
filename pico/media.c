@@ -36,6 +36,7 @@ static int detect_media(const char *fname, const unsigned char *rom, unsigned in
   static const short sms_offsets[] = { 0x7ff0, 0x3ff0, 0x1ff0 };
   static const char *sms_exts[] = { "sms", "gg", "sg" };
   static const char *md_exts[] = { "gen", "smd" };
+  static const char *pico_exts[] = { "pco" };
   char buff0[512], buff[32];
   unsigned short *d16 = NULL;
   pm_file *pmf = NULL;
@@ -101,8 +102,8 @@ static int detect_media(const char *fname, const unsigned char *rom, unsigned in
     goto extension_check;
   }
 
-  /* MD header? Act as TMSS BIOS here */
-  buff[0] = '\0';
+  /* fetch header info */
+  memset(buff, '\0', 17);
   if (!rom) {
     if (pm_seek(pmf, 0x100, SEEK_SET) == 0x100)
       pm_read(buff, 16, pmf);
@@ -110,7 +111,10 @@ static int detect_media(const char *fname, const unsigned char *rom, unsigned in
     if (romsize >= 0x100 + 16)
       memcpy(buff, rom + 0x100, 16);
   }
-
+  /* PICO header? Almost always appropriately marked */
+  if (strstr(buff, " PICO "))
+    goto looks_like_pico;
+  /* MD header? Act as TMSS BIOS here */
   if (strncmp(buff, "SEGA", 4) == 0 || strncmp(buff, " SEG", 4) == 0)
     goto looks_like_md;
 
@@ -142,6 +146,10 @@ extension_check:
     if (strcasecmp(ext, sms_exts[i]) == 0)
       goto looks_like_sms;
 
+  for (i = 0; i < ARRAY_SIZE(pico_exts); i++)
+    if (strcasecmp(ext, pico_exts[i]) == 0)
+      goto looks_like_pico;
+
   /* If everything else fails, make a guess on the reset vector */
   d16 = (unsigned short *)(buff0 + 4);
   if ((((d16[0] << 16) | d16[1]) & 0xffffff) >= romsize) {
@@ -161,6 +169,10 @@ looks_like_md:
 looks_like_sms:
   pm_close(pmf);
   return PM_MARK3;
+
+looks_like_pico:
+  pm_close(pmf);
+  return PM_PICO;
 }
 
 /* checks if fname points to valid MegaCD image */
@@ -287,6 +299,9 @@ enum media_type_e PicoLoadMedia(const char *filename,
   }
   else if (media_type == PM_MARK3) {
     PicoIn.AHW = PAHW_SMS;
+  }
+  else if (media_type == PM_PICO) {
+    PicoIn.AHW = PAHW_PICO;
   }
 
   if (!rom) {

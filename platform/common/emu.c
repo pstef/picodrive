@@ -28,10 +28,6 @@
 #include <pico/pico_int.h>
 #include <pico/patch.h>
 
-#ifdef USE_LIBRETRO_VFS
-#include "file_stream_transforms.h"
-#endif
-
 #if defined(__GNUC__) && __GNUC__ >= 7
 #pragma GCC diagnostic ignored "-Wformat-truncation"
 #endif
@@ -990,7 +986,7 @@ void emu_set_fastforward(int set_on)
 		set_EmuOpt = currentConfig.EmuOpt;
 		PicoIn.sndOut = NULL;
 		currentConfig.Frameskip = 8;
-		currentConfig.EmuOpt &= ~4;
+		currentConfig.EmuOpt &= ~EOPT_EN_SOUND;
 		currentConfig.EmuOpt |= EOPT_NO_FRMLIMIT;
 		is_on = 1;
 		emu_status_msg("FAST FORWARD");
@@ -1001,9 +997,6 @@ void emu_set_fastforward(int set_on)
 		currentConfig.EmuOpt = set_EmuOpt;
 		PsndRerate(1);
 		is_on = 0;
-		// mainly to unbreak pcm
-		if (PicoIn.AHW & PAHW_MCD)
-			pcd_state_loaded();
 	}
 }
 
@@ -1180,21 +1173,29 @@ void emu_update_input(void)
 {
 	static int prev_events = 0;
 	int actions[IN_BINDTYPE_COUNT] = { 0, };
-	int pl_actions[2];
+	int pl_actions[4];
 	int events;
 
 	in_update(actions);
 
 	pl_actions[0] = actions[IN_BINDTYPE_PLAYER12];
 	pl_actions[1] = actions[IN_BINDTYPE_PLAYER12] >> 16;
+	pl_actions[2] = actions[IN_BINDTYPE_PLAYER34];
+	pl_actions[3] = actions[IN_BINDTYPE_PLAYER34] >> 16;
 
 	PicoIn.pad[0] = pl_actions[0] & 0xfff;
 	PicoIn.pad[1] = pl_actions[1] & 0xfff;
+	PicoIn.pad[2] = pl_actions[2] & 0xfff;
+	PicoIn.pad[3] = pl_actions[3] & 0xfff;
 
 	if (pl_actions[0] & 0x7000)
 		do_turbo(&PicoIn.pad[0], pl_actions[0]);
 	if (pl_actions[1] & 0x7000)
 		do_turbo(&PicoIn.pad[1], pl_actions[1]);
+	if (pl_actions[2] & 0x7000)
+		do_turbo(&PicoIn.pad[2], pl_actions[2]);
+	if (pl_actions[3] & 0x7000)
+		do_turbo(&PicoIn.pad[3], pl_actions[3]);
 
 	events = actions[IN_BINDTYPE_EMU] & PEV_MASK;
 
