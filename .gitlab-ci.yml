@@ -274,7 +274,7 @@ libretro-build-miyoo-arm32:
 
 #################################### MISC ##################################
 # Emscripten
-#libretro-build-emscripten:
-#  extends:
-#    - .libretro-emscripten-static-retroarch-master
-#    - .core-defs
+libretro-build-emscripten:
+  extends:
+    - .libretro-emscripten-static-retroarch-master
+    - .core-defs
