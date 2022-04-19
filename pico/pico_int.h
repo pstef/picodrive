@@ -342,6 +342,11 @@ struct PicoMisc
   unsigned int  frame_count;   // 1c for movies and idle det
 };
 
+#define PMS_HW_GG	0x1   // Game Gear
+#define PMS_HW_LCD	0x2   // GG LCD
+#define PMS_HW_JAP	0x4   // japanese system
+#define PMS_HW_SG	0x8   // SG-1000
+
 #define PMS_MAP_AUTO	0
 #define PMS_MAP_SEGA	1
 #define PMS_MAP_CODEM	2
@@ -351,6 +356,7 @@ struct PicoMisc
 #define PMS_MAP_N16K	6
 #define PMS_MAP_JANGGUN	7
 #define PMS_MAP_NEMESIS	8
+#define PMS_MAP_8KBRAM	9
 
 struct PicoMS
 {
@@ -362,7 +368,8 @@ struct PicoMS
   unsigned char vdp_buffer;
   unsigned char vdp_hlatch;
   unsigned char io_gg[0x08];
-  unsigned char pad[0x42];
+  unsigned char mapcnt;
+  unsigned char pad[0x41];
 };
 
 // emu state and data for the asm code
@@ -458,6 +465,7 @@ struct PicoSound
   unsigned int fm_pos;                  // last FM position in Q20
   unsigned int psg_pos;                 // last PSG position in Q16
   unsigned int ym2413_pos;              // last YM2413 position
+  unsigned int fm_fir_mul, fm_fir_div;  // ratio for FM resampling FIR
 };
 
 // run tools/mkoffsets pico/pico_int_offs.h if you change these
@@ -845,6 +853,8 @@ void SekInterruptClearS68k(int irq);
 extern short cdda_out_buffer[2*1152];
 
 void cdda_start_play(int lba_base, int lba_offset, int lb_len);
+
+#define YM2612_NATIVE_RATE() (((Pico.m.pal?OSC_PAL:OSC_NTSC)/7 + 3*24) / (6*24))
 
 void ym2612_sync_timers(int z80_cycles, int mode_old, int mode_new);
 void ym2612_pack_state(void);

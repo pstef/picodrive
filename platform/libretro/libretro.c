@@ -85,7 +85,8 @@ static retro_audio_sample_batch_t audio_batch_cb;
 #define VOUT_MAX_WIDTH 320
 #define VOUT_MAX_HEIGHT 240
 
-#define INITIAL_SND_RATE 44100
+#define SND_RATE_DEFAULT 44100
+#define SND_RATE_MAX     53267
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096
@@ -108,6 +109,9 @@ static int vout_width, vout_height, vout_offset;
 static float vout_aspect = 0.0;
 static int vout_ghosting = 0;
 
+static bool libretro_update_av_info = false;
+static bool libretro_update_geometry = false;
+
 #if defined(RENDER_GSKIT_PS2)
 #define VOUT_8BIT_WIDTH 328
 #define VOUT_8BIT_HEIGHT 256
@@ -116,7 +120,7 @@ static void *retro_palette;
 static struct retro_hw_ps2_insets padding;
 #endif
 
-static short ALIGNED(4) sndBuffer[2*INITIAL_SND_RATE/50];
+static short ALIGNED(4) sndBuffer[2*SND_RATE_MAX/50];
 
 static void snd_write(int len);
 
@@ -521,8 +525,6 @@ static void apply_renderer()
 
 void emu_video_mode_change(int start_line, int line_count, int start_col, int col_count)
 {
-   struct retro_system_av_info av_info;
-
    vm_current_start_line = start_line;
    vm_current_line_count = line_count;
    vm_current_start_col = start_col;
@@ -571,9 +573,8 @@ void emu_video_mode_change(int start_line, int line_count, int start_col, int co
 #endif
    Pico.m.dirtyPal = 1;
 
-   // Update the geometry
-   retro_get_system_av_info(&av_info);
-   environ_cb(RETRO_ENVIRONMENT_SET_GEOMETRY, &av_info);
+   /* Notify frontend of geometry update */
+   libretro_update_geometry = true;
 }
 
 void emu_32x_startup(void)
@@ -1588,6 +1589,8 @@ bool retro_load_game(const struct retro_game_info *info)
    PicoIn.writeSound = snd_write;
    memset(sndBuffer, 0, sizeof(sndBuffer));
    PicoIn.sndOut = sndBuffer;
+   if (PicoIn.sndRate > 52000 && PicoIn.sndRate < 54000)
+      PicoIn.sndRate = YM2612_NATIVE_RATE();
    PsndRerate(0);
 
    apply_renderer();
@@ -1596,6 +1599,15 @@ bool retro_load_game(const struct retro_game_info *info)
    set_memory_maps();
 
    init_frameskip();
+
+   /* Initialisation routines may have 'triggered'
+    * a libretro AV info or geometry update; this
+    * happens automatically after retro_load_game(),
+    * so disable the relevant flags here to avoid
+    * redundant updates on the first call of
+    * retro_run() */
+   libretro_update_av_info = false;
+   libretro_update_geometry = false;
 
    return true;
 }
@@ -1766,6 +1778,8 @@ static void update_variables(bool first_run)
          PicoIn.hwSelect = PHWS_AUTO;
       else if (strcmp(var.value, "Game Gear") == 0)
          PicoIn.hwSelect = PHWS_GG;
+      else if (strcmp(var.value, "SG-1000") == 0)
+         PicoIn.hwSelect = PHWS_SG;
       else
          PicoIn.hwSelect = PHWS_SMS;
    }
@@ -1798,6 +1812,8 @@ static void update_variables(bool first_run)
          PicoIn.mapper = PMS_MAP_JANGGUN;
       else if (strcmp(var.value, "Korea Nemesis") == 0)
          PicoIn.mapper = PMS_MAP_NEMESIS;
+      else if (strcmp(var.value, "Taiwan 8K RAM") == 0)
+         PicoIn.mapper = PMS_MAP_8KBRAM;
       else
          PicoIn.mapper = PMS_MAP_SEGA;
    }
@@ -1834,7 +1850,9 @@ static void update_variables(bool first_run)
    {
       PicoDetectRegion();
       PicoLoopPrepare();
-      PsndRerate(1);
+      if (PicoIn.sndRate > 52000 && PicoIn.sndRate < 54000)
+         PicoIn.sndRate = YM2612_NATIVE_RATE();
+      PsndRerate(!first_run);
    }
 
    old_vout_aspect = vout_aspect;
@@ -1849,13 +1867,9 @@ static void update_variables(bool first_run)
          vout_aspect = VOUT_PAR;
    }
 
+   /* Notify frontend of geometry update */
    if (vout_aspect != old_vout_aspect)
-   {
-      // Update the geometry
-      struct retro_system_av_info av_info;
-      retro_get_system_av_info(&av_info);
-      environ_cb(RETRO_ENVIRONMENT_SET_GEOMETRY, &av_info);
-   }
+      libretro_update_geometry = true;
 
    var.value = NULL;
    var.key = "picodrive_sprlim";
@@ -1896,6 +1910,15 @@ static void update_variables(bool first_run)
          PicoIn.opt |= POPT_EN_FM_DAC;
       else
          PicoIn.opt &= ~POPT_EN_FM_DAC;
+   }
+
+   var.value = NULL;
+   var.key = "picodrive_fm_filter";
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
+      if (strcmp(var.value, "on") == 0)
+         PicoIn.opt |= POPT_EN_FM_FILTER;
+      else
+         PicoIn.opt &= ~POPT_EN_FM_FILTER;
    }
 
    old_snd_filter = PicoIn.opt & POPT_EN_SNDFILTER;
@@ -1954,14 +1977,15 @@ static void update_variables(bool first_run)
    var.value = NULL;
    var.key = "picodrive_sound_rate";
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
-      new_sound_rate = atoi(var.value);
+      if (!strcmp(var.value, "native"))
+         new_sound_rate = YM2612_NATIVE_RATE();
+      else
+         new_sound_rate = atoi(var.value);
       if (new_sound_rate != PicoIn.sndRate) {
          /* Update the sound rate */
          PicoIn.sndRate = new_sound_rate;
-         PsndRerate(1);
-         struct retro_system_av_info av_info;
-         retro_get_system_av_info(&av_info);
-         environ_cb(RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO, &av_info);
+         PsndRerate(!first_run);
+         libretro_update_av_info = true;
       }
    }
 
@@ -2147,6 +2171,19 @@ void retro_run(void)
 
    PicoFrame();
 
+   /* Check whether frontend needs to be notified
+    * of timing/geometry changes */
+   if (libretro_update_av_info || libretro_update_geometry) {
+      struct retro_system_av_info av_info;
+      retro_get_system_av_info(&av_info);
+      environ_cb(libretro_update_av_info ?
+            RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO :
+            RETRO_ENVIRONMENT_SET_GEOMETRY,
+            &av_info);
+      libretro_update_av_info = false;
+      libretro_update_geometry = false;
+   }
+
    /* If frame was skipped, call video_cb() with
     * a NULL buffer and return immediately */
    if (PicoIn.skipFrame) {
@@ -2291,7 +2328,7 @@ void retro_init(void)
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
       PicoIn.sndRate = atoi(var.value);
    else
-      PicoIn.sndRate = INITIAL_SND_RATE;
+      PicoIn.sndRate = SND_RATE_DEFAULT;
 
    PicoIn.autoRgnOrder = 0x184; // US, EU, JP
 

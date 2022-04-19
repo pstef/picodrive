@@ -93,12 +93,14 @@ int main(int argc, char *argv[])
 	emu_init();
 
 	engineState = PGS_Menu;
+	plat_video_menu_enter(0);
 
 	if (argc > 1)
 		parse_cmd_line(argc, argv);
 
 	if (engineState == PGS_ReloadRom)
 	{
+		plat_video_menu_begin();
 		if (emu_reload_rom(rom_fname_reload)) {
 			engineState = PGS_Running;
 			if (load_state_slot >= 0) {
@@ -106,7 +108,9 @@ int main(int argc, char *argv[])
 				emu_save_load_game(1, 0);
 			}
 		}
+		plat_video_menu_end();
 	}
+	plat_video_menu_leave();
 
 	for (;;)
 	{

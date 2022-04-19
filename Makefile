@@ -49,7 +49,7 @@ endif
 	LINKOUT ?= -o
 endif
 
-ifeq ("$(PLATFORM)",$(filter "$(PLATFORM)","gp2x" "opendingux" "rpi1"))
+ifeq ("$(PLATFORM)",$(filter "$(PLATFORM)","gp2x" "opendingux" "miyoo" "rpi1"))
 # very small caches, avoid optimization options making the binary much bigger
 CFLAGS += -finline-limit=42 -fno-unroll-loops -fno-ipa-cp -ffast-math
 # this gets you about 20% better execution speed on 32bit arm/mips
@@ -82,11 +82,23 @@ endif
 
 -include Makefile.local
 
-ifeq "$(PLATFORM)" "opendingux"
+# TODO this should somehow go to the platform directory?
+ifeq "$(PLATFORM)" "generic"
+$(TARGET).zip: $(TARGET)
+	$(RM) -rf .od_data
+	mkdir .od_data
+	cp -r platform/linux/skin .od_data
+	cp platform/game_def.cfg .od_data
+	cp $< .od_data/PicoDrive
+	$(STRIP) .od_data/PicoDrive
+	cd .od_data && zip -9 -r ../$@ *
+all: $(TARGET).zip
+endif
 
-# TODO this should somehow go to the platform/opendingux directory?
+ifeq "$(PLATFORM)" "opendingux"
 .od_data: $(TARGET)
 	$(RM) -rf .od_data
+	mkdir .od_data
 	cp -r platform/opendingux/data/. .od_data
 	cp platform/game_def.cfg .od_data
 	cp $< .od_data/PicoDrive
@@ -115,6 +127,22 @@ OBJS += platform/opendingux/inputmap.o
 use_inputmap ?= 1
 
 # OpenDingux is a generic platform, really.
+PLATFORM := generic
+endif
+ifeq "$(PLATFORM)" "miyoo"
+$(TARGET).zip: $(TARGET)
+	$(RM) -rf .od_data
+	mkdir .od_data
+	cp -r platform/opendingux/data/. .od_data
+	cp platform/game_def.cfg .od_data
+	cp $< .od_data/PicoDrive
+	$(STRIP) .od_data/PicoDrive
+	rm -f .od_data/default.*.desktop .od_data/PicoDrive.dge
+	cd .od_data && zip -9 -r ../$@ *
+all: $(TARGET).zip
+
+OBJS += platform/opendingux/inputmap.o
+use_inputmap ?= 1
 PLATFORM := generic
 endif
 ifeq ("$(PLATFORM)",$(filter "$(PLATFORM)","rpi1" "rpi2"))

@@ -35,7 +35,7 @@ static int detect_media(const char *fname, const unsigned char *rom, unsigned in
 {
   static const short sms_offsets[] = { 0x7ff0, 0x3ff0, 0x1ff0 };
   static const char *sms_exts[] = { "sms", "gg", "sg" };
-  static const char *md_exts[] = { "gen", "smd" };
+  static const char *md_exts[] = { "gen", "smd", "md" };
   static const char *pico_exts[] = { "pco" };
   char buff0[512], buff[32];
   unsigned short *d16 = NULL;
@@ -352,7 +352,7 @@ enum media_type_e PicoLoadMedia(const char *filename,
   rom_data = NULL; // now belongs to PicoCart
 
   // simple test for GG. Do this here since m.hardware is nulled in Insert
-  if (PicoIn.AHW & PAHW_SMS) {
+  if ((PicoIn.AHW & PAHW_SMS) && !PicoIn.hwSelect) {
     const char *ext = NULL;
     if (rom_file && rom_file->ext && (*rom_file->ext != '\0')) {
       ext = rom_file->ext;
@@ -363,8 +363,11 @@ enum media_type_e PicoLoadMedia(const char *filename,
       }
     }
     if (ext && !strcmp(ext,"gg") && !PicoIn.hwSelect) {
-      Pico.m.hardware |= 0x1;
+      Pico.m.hardware |= PMS_HW_GG;
       lprintf("detected GG ROM\n");
+    } else if (ext && !strcmp(ext,"sg")) {
+      Pico.m.hardware |= PMS_HW_SG;
+      lprintf("detected SG-1000 ROM\n");
     } else
       lprintf("detected SMS ROM\n");
   }

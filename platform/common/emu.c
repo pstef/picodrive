@@ -57,7 +57,7 @@ int pico_inp_mode;
 int flip_after_sync;
 int engineState = PGS_Menu;
 
-static short __attribute__((aligned(4))) sndBuffer[2*44100/50];
+static short __attribute__((aligned(4))) sndBuffer[2*54000/50];
 
 /* tmp buff to reduce stack usage for plats with small stack */
 static char static_buff[512];
@@ -332,9 +332,11 @@ static void system_announce(void)
 
 	if (PicoIn.AHW & PAHW_SMS) {
 		sys_name = "Master System";
-		if (Pico.m.hardware & 0x1)
+		if (Pico.m.hardware & PMS_HW_GG)
 			sys_name = "Game Gear";
-		else if (Pico.m.hardware & 0x4)
+		else if (Pico.m.hardware & PMS_HW_SG)
+			sys_name = "SG-1000";
+		else if (Pico.m.hardware & PMS_HW_JAP)
 			sys_name = "Mark III";
 #ifdef NO_SMS
 		extra = " [no support]";
@@ -1326,6 +1328,9 @@ void emu_sound_start(void)
 {
 	PicoIn.sndOut = NULL;
 
+	// auto-select rate?
+	if (PicoIn.sndRate > 52000 && PicoIn.sndRate < 54000)
+		PicoIn.sndRate = YM2612_NATIVE_RATE();
 	if (currentConfig.EmuOpt & EOPT_EN_SOUND)
 	{
 		int is_stereo = (PicoIn.opt & POPT_EN_STEREO) ? 1 : 0;
