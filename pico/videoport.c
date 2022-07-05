@@ -984,14 +984,15 @@ static u32 VideoSr(const struct PicoVideo *pv)
 {
   unsigned int hp = pv->reg[12]&1 ? hboff40*488/slots40 : hboff32*488/slots32;
   unsigned int hl = pv->reg[12]&1 ? hblen40*488/slots40 : hblen32*488/slots32;
-  unsigned int c;
-  u32 d = (u16)pv->status;
+  unsigned int c = SekCyclesDone() - Pico.t.m68c_line_start;
+  u32 d;
 
-  c = SekCyclesDone() - Pico.t.m68c_line_start;
+  PicoVideoFIFOSync(c);
+  d = (u16)pv->status;
+
   if (c - hp < hl)
     d |= SR_HB;
 
-  PicoVideoFIFOSync(c);
   if (VdpFIFO.fifo_total >= 4)
     d |= SR_FULL;
   else if (!VdpFIFO.fifo_total)
@@ -1104,8 +1105,9 @@ void PicoVideoCacheSAT(int load)
 
   // rebuild SAT cache XXX wrong since cache and memory can differ
   for (l = 0; load && l < 80; l++) {
-    ((u16 *)VdpSATCache)[l*2    ] = PicoMem.vram[(SATaddr>>1) + l*4    ];
-    ((u16 *)VdpSATCache)[l*2 + 1] = PicoMem.vram[(SATaddr>>1) + l*4 + 1];
+    u16 addr = SATaddr + l*8;
+    ((u16 *)VdpSATCache)[l*2    ] = PicoMem.vram[(addr>>1)    ];
+    ((u16 *)VdpSATCache)[l*2 + 1] = PicoMem.vram[(addr>>1) + 1];
   }
 
   Pico.est.rendstatus |= PDRAW_SPRITES_MOVED;
