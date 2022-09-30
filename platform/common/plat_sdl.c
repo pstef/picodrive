@@ -191,7 +191,7 @@ void plat_video_flip(void)
 		g_screen_ptr = plat_sdl_screen->pixels;
 		plat_video_set_buffer(g_screen_ptr);
 		if (clear_buf_cnt) {
-			memset(g_screen_ptr, 0, plat_sdl_screen->w*plat_sdl_screen->h * 2);
+			memset(g_screen_ptr, 0, plat_sdl_screen->pitch*plat_sdl_screen->h);
 			clear_buf_cnt--;
 		}
 	}
@@ -225,7 +225,7 @@ void plat_video_clear_buffers(void)
 	if (plat_sdl_overlay || plat_sdl_gl_active)
 		memset(shadow_fb, 0, g_menuscreen_w * g_menuscreen_h * 2);
 	else {
-		memset(g_screen_ptr, 0, plat_sdl_screen->w*plat_sdl_screen->h * 2);
+		memset(g_screen_ptr, 0, plat_sdl_screen->pitch*plat_sdl_screen->h);
 		clear_buf_cnt = 3; // do it thrice in case of triple buffering
 	}
 }
@@ -234,12 +234,11 @@ void plat_video_menu_enter(int is_rom_loaded)
 {
 	if (SDL_MUSTLOCK(plat_sdl_screen))
 		SDL_UnlockSurface(plat_sdl_screen);
-	plat_sdl_change_video_mode(g_menuscreen_w, g_menuscreen_h, 1);
-	resize_buffers();
 }
 
 void plat_video_menu_begin(void)
 {
+	plat_sdl_change_video_mode(g_menuscreen_w, g_menuscreen_h, 1);
 	resize_buffers();
 	if (plat_sdl_overlay || plat_sdl_gl_active) {
 		g_menuscreen_pp = g_menuscreen_w;
@@ -318,10 +317,10 @@ void plat_early_init(void)
 static void plat_sdl_resize(int w, int h)
 {
 	// take over new settings
-	g_menuscreen_h = (plat_sdl_screen->h < 480 ? plat_sdl_screen->h : 480);
-	if (!plat_sdl_overlay && !plat_sdl_gl_active)
-		g_menuscreen_h = plat_sdl_screen->h;
-	g_menuscreen_w = g_menuscreen_h * plat_sdl_screen->w/plat_sdl_screen->h;
+	g_menuscreen_h = plat_sdl_screen->h;
+	g_menuscreen_w = plat_sdl_screen->w;
+	resize_buffers();
+	rendstatus_old = -1;
 }
 
 static void plat_sdl_quit(void)
