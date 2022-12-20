@@ -59,7 +59,7 @@ static void (*m68k_write16_io)(u32 a, u32 d);
 #define REG8IN16(ptr, offs) ((u8 *)ptr)[MEM_BE2(offs)]
 
 // poll detection
-#define POLL_THRESHOLD 9  // cosmic carnage
+#define POLL_THRESHOLD 9  // Primal Rage
 
 static struct {
   u32 addr1, addr2, cycles;
@@ -203,7 +203,7 @@ static NOINLINE u32 sh2_poll_read(u32 a, u32 d, unsigned int cycles, SH2* sh2)
     idx = (idx+1) % PFIFO_SZ;
 
     if (cpu != p->cpu) {
-      if (CYCLES_GT(cycles, p->cycles+80)) {
+      if (CYCLES_GT(cycles, p->cycles+60)) { // ~180 sh2 cycles, Spiderman
         // drop older fifo stores that may cause synchronisation problems.
         p->a = -1;
       } else if (p->a == a) {
@@ -816,7 +816,7 @@ static void p32x_sh2reg_write8(u32 a, u32 d, SH2 *sh2)
       Pico32x.sh2_regs[0] &= ~0x80;
       Pico32x.sh2_regs[0] |= d & 0x80;
 
-      if ((d ^ old) & 1)
+      if ((old ^ d) & 1)
         p32x_pwm_schedule_sh2(sh2);
       if ((old ^ d) & 2)
         p32x_update_cmd_irq(sh2, 0);
@@ -1694,23 +1694,6 @@ static void REGPARM(3) sh2_write8_da(u32 a, u32 d, SH2 *sh2)
 }
 #endif
 
-static NOINLINE void REGPARM(3) sh2_write8_sdram_sync(u32 a, u32 d, SH2 *sh2)
-{
-  DRC_SAVE_SR(sh2);
-  sh2_end_run(sh2, 32);
-  DRC_RESTORE_SR(sh2);
-  sh2_write8_sdram(a, d, sh2);
-}
-
-static void REGPARM(3) sh2_write8_sdram_wt(u32 a, u32 d, SH2 *sh2)
-{
-  // xmen sync hack..
-  if ((a << 8) >> 17) // ((a & 0x00ffffff) < 0x200)
-    sh2_write8_sdram(a, d, sh2);
-  else
-    sh2_write8_sdram_sync(a, d, sh2);
-}
-
 // write16
 static void REGPARM(3) sh2_write16_unmapped(u32 a, u32 d, SH2 *sh2)
 {
@@ -1793,7 +1776,7 @@ static void REGPARM(3) sh2_write16_rom(u32 a, u32 d, SH2 *sh2)
   // Presumably the write goes to the CPU cache and is read back from there,
   // but it would be extremely costly to emulate cache behaviour. Just allow
   // writes to that region, hoping that the original ROM values are never used.
-  if ((a1 & 0x3e0000) == 0x3e0000)
+  if ((a1 & 0x3e0000) == 0x3e0000 && (PicoIn.quirks & PQUIRK_WWFRAW_HACK))
     ((u16 *)sh2->p_rom)[a1 / 2] = d;
   else
     sh2_write16_unmapped(a, d, sh2);
@@ -1966,6 +1949,16 @@ void *p32x_sh2_get_mem_ptr(u32 a, u32 *mask, SH2 *sh2)
   }
 
   return ret;
+}
+
+int p32x_sh2_mem_is_rom(u32 a, SH2 *sh2)
+{
+  if ((a & 0xc6000000) == 0x02000000) {
+    // ROM, but mind tweak for WWF Raw
+    return !(PicoIn.quirks & PQUIRK_WWFRAW_HACK) || (a & 0x3f0000) < 0x3e0000;
+  }
+
+  return 0;
 }
 
 int p32x_sh2_memcpy(u32 dst, u32 src, int count, int size, SH2 *sh2)
@@ -2403,7 +2396,6 @@ void PicoMemSetup32x(void)
   msh2_read16_map[0x06/2].addr  = msh2_read16_map[0x26/2].addr  =
   msh2_read32_map[0x06/2].addr  = msh2_read32_map[0x26/2].addr  = MAP_MEMORY(Pico32xMem->sdram);
   msh2_write8_map[0x06/2]       = msh2_write8_map[0x26/2]       = sh2_write8_sdram;
-  msh2_write8_map[0x26/2]       = sh2_write8_sdram_wt;
 
   msh2_write16_map[0x06/2]      = msh2_write16_map[0x26/2]      = sh2_write16_sdram;
   msh2_write32_map[0x06/2]      = msh2_write32_map[0x26/2]      = sh2_write32_sdram;
