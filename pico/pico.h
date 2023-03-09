@@ -83,11 +83,15 @@ extern void *p32x_bios_g, *p32x_bios_m, *p32x_bios_s;
 #define PAHW_SVP    (1<<2)
 #define PAHW_PICO   (1<<3)
 #define PAHW_SMS    (1<<4)
+#define PAHW_GG     (1<<5)
+#define PAHW_SG     (1<<6)
+#define PAHW_SC     (1<<7)
 
 #define PHWS_AUTO   0
 #define PHWS_GG     1
 #define PHWS_SMS    2
 #define PHWS_SG     3
+#define PHWS_SC     4
 
 #define PQUIRK_FORCE_6BTN       (1<<0)
 #define PQUIRK_BLACKTHORNE_HACK (1<<1)

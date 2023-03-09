@@ -162,7 +162,7 @@ static void ParseSpritesM4(int scanline)
 
   if (pv->reg[0] & 8)
     xoff -= 8;  // sprite shift
-  if ((Pico.m.hardware & (PMS_HW_GG|PMS_HW_LCD)) == (PMS_HW_GG|PMS_HW_LCD))
+  if (Pico.m.hardware & PMS_HW_LCD)
     xoff -= 48; // GG LCD, adjust to center 160 px
 
   sat = (u8 *)PicoMem.vram + ((pv->reg[5] & 0x7e) << 7);
@@ -237,7 +237,7 @@ static void DrawStripM4(const u16 *nametab, int cells_dx, int tilex_ty)
   int addr = 0, pal = 0;
 
   // Draw tiles across screen:
-  for (; cells_dx > 0; cells_dx += 8, tilex_ty++, cells_dx -= 0x10000)
+  for (; cells_dx >= 0; cells_dx += 8, tilex_ty++, cells_dx -= 0x10000)
   {
     unsigned int pack;
     unsigned code;
@@ -294,7 +294,7 @@ static void DrawDisplayM4(int scanline)
 
   tilex = (32 - (dx >> 3) + cellskip) & 0x1f;
   ty = (line & 7) << 1; // Y-Offset into tile
-  cells = maxcells - cellskip;
+  cells = maxcells - cellskip - 1;
 
   dx = (dx & 7);
   dx += cellskip << 3;
@@ -302,7 +302,7 @@ static void DrawDisplayM4(int scanline)
 
   // tiles
   if (!(pv->debug_p & PVD_KILL_B)) {
-    if ((Pico.m.hardware & (PMS_HW_GG|PMS_HW_LCD)) == (PMS_HW_GG|PMS_HW_LCD)) {
+    if (Pico.m.hardware & PMS_HW_LCD) {
       // on GG render only the center 160 px, but mind hscroll
       DrawStripM4(nametab , (dx-8) | ((cells-11)<< 16),(tilex+5) | (ty  << 16));
     } else if (pv->reg[0] & 0x80) {
@@ -318,7 +318,7 @@ static void DrawDisplayM4(int scanline)
   if (!(pv->debug_p & PVD_KILL_S_LO))
     DrawSpritesM4();
 
-  if ((pv->reg[0] & 0x20) && (Pico.m.hardware & (PMS_HW_GG|PMS_HW_LCD)) != (PMS_HW_GG|PMS_HW_LCD)) {
+  if ((pv->reg[0] & 0x20) && !(Pico.m.hardware & PMS_HW_LCD)) {
     // first column masked with background, caculate offset to start of line
     dx = line_offset / 4;
     ty = ((pv->reg[7]&0x0f)|0x10) * 0x01010101;
@@ -529,7 +529,7 @@ static void DrawSpritesTMS(void)
 static void DrawStripM1(const u8 *nametab, const u8 *pattab, int cells_dx, int tilex_ty)
 {
   // Draw tiles across screen:
-  for (; cells_dx > 0; cells_dx += 6, tilex_ty++, cells_dx -= 0x10000)
+  for (; cells_dx >= 0; cells_dx += 6, tilex_ty++, cells_dx -= 0x10000)
   {
     unsigned int pack, pal;
     unsigned code;
@@ -560,7 +560,7 @@ static void DrawDisplayM1(int scanline)
   pattab  += (scanline & 0x7);
 
   tilex = cellskip & 0x1f;
-  cells = maxcells - cellskip;
+  cells = maxcells - cellskip - 1;
   dx = 8 + (cellskip << 3) + line_offset;
 
   // tiles
@@ -576,7 +576,7 @@ static void DrawDisplayM1(int scanline)
 static void DrawStripM2(const u8 *nametab, const u8 *pattab, int cells_dx, int tilex_ty)
 {
   // Draw tiles across screen:
-  for (; cells_dx > 0; cells_dx += 8, tilex_ty++, cells_dx -= 0x10000)
+  for (; cells_dx >= 0; cells_dx += 8, tilex_ty++, cells_dx -= 0x10000)
   {
     unsigned int pal;
     unsigned code;
@@ -606,7 +606,7 @@ static void DrawDisplayM2(int scanline)
   pattab  += (scanline>>2) & 0x7;
 
   tilex = cellskip & 0x1f;
-  cells = maxcells - cellskip;
+  cells = maxcells - cellskip - 1;
   dx = (cellskip << 3) + line_offset;
 
   // tiles
@@ -626,7 +626,7 @@ static void DrawDisplayM2(int scanline)
 static void DrawStripM3(const u8 *nametab, const u8 *coltab, const u8 *pattab, int cells_dx, int tilex_ty)
 {
   // Draw tiles across screen:
-  for (; cells_dx > 0; cells_dx += 8, tilex_ty++, cells_dx -= 0x10000)
+  for (; cells_dx >= 0; cells_dx += 8, tilex_ty++, cells_dx -= 0x10000)
   {
     unsigned int pack, pal;
     unsigned code;
@@ -657,7 +657,7 @@ static void DrawDisplayM3(int scanline)
   pattab  += ((scanline>>6) <<11) + (scanline & 0x7);
 
   tilex = cellskip & 0x1f;
-  cells = maxcells - cellskip;
+  cells = maxcells - cellskip - 1;
   dx = (cellskip << 3) + line_offset;
 
   // tiles
@@ -677,7 +677,7 @@ static void DrawDisplayM3(int scanline)
 static void DrawStripM0(const u8 *nametab, const u8 *coltab, const u8 *pattab, int cells_dx, int tilex_ty)
 {
   // Draw tiles across screen:
-  for (; cells_dx > 0; cells_dx += 8, tilex_ty++, cells_dx -= 0x10000)
+  for (; cells_dx >= 0; cells_dx += 8, tilex_ty++, cells_dx -= 0x10000)
   {
     unsigned int pack, pal;
     unsigned code;
@@ -707,7 +707,7 @@ static void DrawDisplayM0(int scanline)
   pattab  += (scanline & 0x7);
 
   tilex = cellskip & 0x1f;
-  cells = maxcells - cellskip;
+  cells = maxcells - cellskip - 1;
   dx = (cellskip << 3) + line_offset;
 
   // tiles
@@ -742,30 +742,32 @@ void PicoFrameStartSMS(void)
 
   // Copy LCD enable flag for easier handling
   Pico.m.hardware &= ~PMS_HW_LCD;
-  if ((PicoIn.opt & POPT_EN_GG_LCD) && (Pico.m.hardware & PMS_HW_GG))
+  if ((PicoIn.opt & POPT_EN_GG_LCD) && (PicoIn.AHW & PAHW_GG)) {
     Pico.m.hardware |= PMS_HW_LCD;
 
-  if (!(Pico.m.hardware & PMS_HW_LCD) && (mode & 4) && (Pico.video.reg[0] & 0x20)) {
-    // SMS mode 4 with 1st column blanked
-    columns = 248;
-    Pico.est.rendstatus |= PDRAW_SMS_BLANK_1;
-  }
-  if ((Pico.m.hardware & (PMS_HW_GG|PMS_HW_LCD)) == (PMS_HW_GG|PMS_HW_LCD)) {
     // GG LCD always has 160x144 regardless of settings
     screen_offset = 24; // nonetheless the vdp timing has 224 lines
     loffs = 48;
     lines = 144;
     columns = 160;
-  } else switch (mode) {
-  // SMS2 only 224/240 line modes, e.g. Micro Machines
-  case 0x06|0x08:
-      loffs = screen_offset = 0;
-      lines = 240;
-      break;
-  case 0x06|0x10:
-      loffs = screen_offset = 8;
-      lines = 224;
-      break;
+  } else {
+    if ((mode & 4) && (Pico.video.reg[0] & 0x20)) {
+      // SMS mode 4 with 1st column blanked
+      columns = 248;
+      Pico.est.rendstatus |= PDRAW_SMS_BLANK_1;
+    }
+
+    switch (mode) {
+    // SMS2 only 224/240 line modes, e.g. Micro Machines
+    case 0x06|0x08:
+        loffs = screen_offset = 0;
+        lines = 240;
+        break;
+    case 0x06|0x10:
+        loffs = screen_offset = 8;
+        lines = 224;
+        break;
+    }
   }
 
   line_offset = 8; // FinalizeLine requires HighCol+8
@@ -811,7 +813,7 @@ void PicoLineSMS(int line)
   unsigned bgcolor;
 
   // GG LCD, render only visible part of screen
-  if ((Pico.m.hardware & (PMS_HW_GG|PMS_HW_LCD)) == (PMS_HW_GG|PMS_HW_LCD) && (line < 24 || line >= 24+144))
+  if ((Pico.m.hardware & PMS_HW_LCD) && (line < 24 || line >= 24+144))
     goto norender;
 
   if (PicoScanBegin != NULL && skip == 0)
@@ -878,7 +880,7 @@ void PicoDoHighPal555SMS(void)
    * hence GG/SMS/TMS can all be handled the same here */
   for (j = cnt; j > 0; j--) {
     if (!(Pico.video.reg[0] & 0x4)) // fixed palette in TMS modes
-      spal = (u32 *)tmspal + (Pico.m.hardware & PMS_HW_SG ? 16/2 : 0);
+      spal = (u32 *)tmspal + (PicoIn.AHW & (PAHW_SG|PAHW_SC) ? 16/2:0);
     for (i = 0x20/2; i > 0; i--, spal++, dpal++) { 
       t = *spal;
 #if defined(USE_BGR555)
