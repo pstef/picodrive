@@ -146,7 +146,9 @@ PICO_INTERNAL void PicoDetectRegion(void)
   else if (support&1)   hw=0x00;          // Japan NTSC
   else hw=0x80; // USA
 
-  Pico.m.hardware=(unsigned char)(hw|0x20); // No disk attached
+  if (!(PicoIn.AHW & PAHW_MCD)) hw |= 0x20; // No disk attached
+
+  Pico.m.hardware=(unsigned char)hw; 
   Pico.m.pal=pal;
 }
 
@@ -187,7 +189,7 @@ int PicoReset(void)
   PsndReset(); // pal must be known here
 
   // create an empty "dma" to cause 68k exec start at random frame location
-  Pico.t.m68c_line_start = Pico.t.m68c_cnt;
+  Pico.t.m68c_line_start = Pico.t.m68c_aim;
   PicoVideoFIFOWrite(rand() & 0x1fff, 0, 0, PVS_CPURD);
 
   SekFinishIdleDet();

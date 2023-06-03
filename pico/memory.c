@@ -66,21 +66,54 @@ void z80_map_set(uptr *map, u16 start_addr, u16 end_addr,
 void cpu68k_map_set(uptr *map, u32 start_addr, u32 end_addr,
     const void *func_or_mh, int is_func)
 {
-  xmap_set(map, M68K_MEM_SHIFT, start_addr, end_addr, func_or_mh, is_func);
+  xmap_set(map, M68K_MEM_SHIFT, start_addr, end_addr, func_or_mh, is_func & 1);
 #ifdef EMU_F68K
   // setup FAME fetchmap
-  if (!is_func)
+  if (!(is_func & 1))
   {
+    M68K_CONTEXT *ctx = is_func & 2 ? &PicoCpuFS68k : &PicoCpuFM68k;
     int shiftout = 24 - FAMEC_FETCHBITS;
     int i = start_addr >> shiftout;
     uptr base = (uptr)func_or_mh - (i << shiftout);
     for (; i <= (end_addr >> shiftout); i++)
-      PicoCpuFM68k.Fetch[i] = base;
+      ctx->Fetch[i] = base;
   }
 #endif
 }
 
 // more specialized/optimized function (does same as above)
+void cpu68k_map_read_mem(u32 start_addr, u32 end_addr, void *ptr, int is_sub)
+{
+  uptr *r8map, *r16map;
+  uptr addr = (uptr)ptr;
+  int shift = M68K_MEM_SHIFT;
+  int i;
+
+  if (!is_sub) {
+    r8map = m68k_read8_map;
+    r16map = m68k_read16_map;
+  } else {
+    r8map = s68k_read8_map;
+    r16map = s68k_read16_map;
+  }
+
+  addr -= start_addr;
+  addr >>= 1;
+  for (i = start_addr >> shift; i <= end_addr >> shift; i++)
+    r8map[i] = r16map[i] = addr;
+#ifdef EMU_F68K
+  // setup FAME fetchmap
+  {
+    M68K_CONTEXT *ctx = is_sub ? &PicoCpuFS68k : &PicoCpuFM68k;
+    int shiftout = 24 - FAMEC_FETCHBITS;
+    i = start_addr >> shiftout;
+    addr = (uptr)ptr - (i << shiftout);
+    for (; i <= (end_addr >> shiftout); i++)
+      ctx->Fetch[i] = addr;
+  }
+#endif
+}
+
 void cpu68k_map_all_ram(u32 start_addr, u32 end_addr, void *ptr, int is_sub)
 {
   uptr *r8map, *r16map, *w8map, *w16map;
@@ -115,6 +148,55 @@ void cpu68k_map_all_ram(u32 start_addr, u32 end_addr, void *ptr, int is_sub)
       ctx->Fetch[i] = addr;
   }
 #endif
+}
+
+void cpu68k_map_read_funcs(u32 start_addr, u32 end_addr, u32 (*r8)(u32), u32 (*r16)(u32), int is_sub)
+{
+  uptr *r8map, *r16map;
+  uptr ar8 = (uptr)r8, ar16 = (uptr)r16;
+  int shift = M68K_MEM_SHIFT;
+  int i;
+
+  if (!is_sub) {
+    r8map = m68k_read8_map;
+    r16map = m68k_read16_map;
+  } else {
+    r8map = s68k_read8_map;
+    r16map = s68k_read16_map;
+  }
+
+  ar8 = (ar8 >> 1 ) | MAP_FLAG;
+  ar16 = (ar16 >> 1 ) | MAP_FLAG;
+  for (i = start_addr >> shift; i <= end_addr >> shift; i++)
+    r8map[i] = ar8, r16map[i] = ar16;
+}
+
+void cpu68k_map_all_funcs(u32 start_addr, u32 end_addr, u32 (*r8)(u32), u32 (*r16)(u32), void (*w8)(u32, u32), void (*w16)(u32, u32), int is_sub)
+{
+  uptr *r8map, *r16map, *w8map, *w16map;
+  uptr ar8 = (uptr)r8, ar16 = (uptr)r16;
+  uptr aw8 = (uptr)w8, aw16 = (uptr)w16;
+  int shift = M68K_MEM_SHIFT;
+  int i;
+
+  if (!is_sub) {
+    r8map = m68k_read8_map;
+    r16map = m68k_read16_map;
+    w8map = m68k_write8_map;
+    w16map = m68k_write16_map;
+  } else {
+    r8map = s68k_read8_map;
+    r16map = s68k_read16_map;
+    w8map = s68k_write8_map;
+    w16map = s68k_write16_map;
+  }
+
+  ar8 = (ar8 >> 1 ) | MAP_FLAG;
+  ar16 = (ar16 >> 1 ) | MAP_FLAG;
+  aw8 = (aw8 >> 1 ) | MAP_FLAG;
+  aw16 = (aw16 >> 1 ) | MAP_FLAG;
+  for (i = start_addr >> shift; i <= end_addr >> shift; i++)
+    r8map[i] = ar8, r16map[i] = ar16, w8map[i] = aw8, w16map[i] = aw16;
 }
 
 static u32 m68k_unmapped_read8(u32 a)
@@ -325,7 +407,7 @@ static NOINLINE u32 port_read(int i)
   out = data_reg & ctrl_reg;
 
   // pull-ups: should be 0x7f, but Decap Attack has a bug where it temp.
-  // disables output before doing TH-low read, so don't emulate it for TH.
+  // disables output before doing TH-low read, so emulate RC filter for TH.
   // Decap Attack reportedly doesn't work on Nomad but works on must
   // other MD revisions (different pull-up strength?).
   u32 mask = 0x3f;
@@ -599,9 +681,10 @@ static u32 PicoRead8_z80(u32 a)
     return 0;
   }
 
-  if ((a & 0x4000) == 0x0000)
+  if ((a & 0x4000) == 0x0000) {
+    SekCyclesBurnRun(1);
     d = PicoMem.zram[a & 0x1fff];
-  else if ((a & 0x6000) == 0x4000) // 0x4000-0x5fff
+  } else if ((a & 0x6000) == 0x4000) // 0x4000-0x5fff
     d = ym2612_read_local_68k(); 
   else
     elprintf(EL_UIO|EL_ANOMALY, "68k bad read [%06x] @%06x", a, SekPc);
@@ -623,6 +706,7 @@ static void PicoWrite8_z80(u32 a, u32 d)
   }
 
   if ((a & 0x4000) == 0x0000) { // z80 RAM
+    SekCyclesBurnRun(1);
     PicoMem.zram[a & 0x1fff] = (u8)d;
     return;
   }
@@ -914,18 +998,6 @@ PICO_INTERNAL void PicoMemSetup(void)
   PicoCpuFM68k.write_byte = (void *)m68k_write8;
   PicoCpuFM68k.write_word = (void *)m68k_write16;
   PicoCpuFM68k.write_long = (void *)m68k_write32;
-
-  // setup FAME fetchmap
-  {
-    int i;
-    // by default, point everything to first 64k of ROM
-    for (i = 0; i < M68K_FETCHBANK1 * 0xe0 / 0x100; i++)
-      PicoCpuFM68k.Fetch[i] = (uptr)Pico.rom - (i<<(24-FAMEC_FETCHBITS));
-    // now real ROM
-    for (i = 0; i < M68K_FETCHBANK1 && (i<<(24-FAMEC_FETCHBITS)) < Pico.romsize; i++)
-      PicoCpuFM68k.Fetch[i] = (uptr)Pico.rom;
-    // RAM already set
-  }
 #endif
 #ifdef EMU_M68K
   m68k_mem_setup();
@@ -1269,9 +1341,10 @@ void PicoWrite16_32x(u32 a, u32 d) {}
 
 static unsigned char z80_md_vdp_read(unsigned short a)
 {
-  z80_subCLeft(2);
+  if ((a & 0xff00) == 0x7f00) {
+    z80_subCLeft(3);
+    Pico.t.z80_buscycles += 7;
 
-  if ((a & 0x00f0) == 0x0000) {
     switch (a & 0x0d)
     {
       case 0x00: return PicoVideoRead8DataH(1);

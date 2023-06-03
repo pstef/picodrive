@@ -182,6 +182,21 @@ static const char *find_bios(int *region, const char *cd_fname)
 			(*region == 8 ? "EU" : "JAP") : "USA");
 	}
 
+	// look for MSU.MD rom file. XXX another extension list? ugh...
+	static const char *md_exts[] = { "gen", "smd", "md", "32x" };
+	char *ext = strrchr(cd_fname, '.');
+	int extpos = ext ? ext-cd_fname : strlen(cd_fname);
+	strcpy(static_buff, cd_fname);
+	static_buff[extpos++] = '.';
+	for (i = 0; i < ARRAY_SIZE(md_exts); i++) {
+		strcpy(static_buff+extpos, md_exts[i]);
+		if (access(static_buff, R_OK) == 0) {
+			printf("found MSU rom: %s\n",static_buff);
+			return static_buff;
+		}
+	}
+
+	// locate BIOS file
 	if (*region == 4) { // US
 		files = biosfiles_us;
 		count = sizeof(biosfiles_us) / sizeof(char *);
@@ -1251,7 +1266,6 @@ void emu_cmn_forced_frame(int no_scale, int do_emu, void *buf)
 	PicoDrawSetOutFormat(PDF_RGB555, 1);
 	PicoDrawSetOutBuf(buf, g_screen_ppitch * 2);
 	Pico.m.dirtyPal = 1;
-	Pico.est.rendstatus |= PDRAW_DIRTY_SPRITES;
 	if (do_emu)
 		PicoFrame();
 	else

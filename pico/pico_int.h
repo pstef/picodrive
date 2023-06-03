@@ -44,8 +44,8 @@ extern struct Cyclone PicoCpuCM68k, PicoCpuCS68k;
 #define SekDarS68k(x) (x < 8 ? PicoCpuCS68k.d[x] : PicoCpuCS68k.a[x - 8])
 #define SekSr     CycloneGetSr(&PicoCpuCM68k)
 #define SekSrS68k CycloneGetSr(&PicoCpuCS68k)
-#define SekSetStop(x) { PicoCpuCM68k.state_flags&=~1; if (x) { PicoCpuCM68k.state_flags|=1; PicoCpuCM68k.cycles=0; } }
-#define SekSetStopS68k(x) { PicoCpuCS68k.state_flags&=~1; if (x) { PicoCpuCS68k.state_flags|=1; PicoCpuCS68k.cycles=0; } }
+#define SekSetStop(x) { PicoCpuCM68k.state_flags&=~1; if (x) { PicoCpuCM68k.state_flags|=1; SekEndRun(0); } }
+#define SekSetStopS68k(x) { PicoCpuCS68k.state_flags&=~1; if (x) { PicoCpuCS68k.state_flags|=1; SekEndRunS68k(0); } }
 #define SekIsStoppedM68k() (PicoCpuCM68k.state_flags&1)
 #define SekIsStoppedS68k() (PicoCpuCS68k.state_flags&1)
 #define SekShouldInterrupt() (PicoCpuCM68k.irq > (PicoCpuCM68k.srh&7))
@@ -71,11 +71,11 @@ extern M68K_CONTEXT PicoCpuFM68k, PicoCpuFS68k;
 #define SekSrS68k PicoCpuFS68k.sr
 #define SekSetStop(x) { \
 	PicoCpuFM68k.execinfo &= ~FM68K_HALTED; \
-	if (x) { PicoCpuFM68k.execinfo |= FM68K_HALTED; PicoCpuFM68k.io_cycle_counter = 0; } \
+	if (x) { PicoCpuFM68k.execinfo |= FM68K_HALTED; SekEndRun(0); } \
 }
 #define SekSetStopS68k(x) { \
 	PicoCpuFS68k.execinfo &= ~FM68K_HALTED; \
-	if (x) { PicoCpuFS68k.execinfo |= FM68K_HALTED; PicoCpuFS68k.io_cycle_counter = 0; } \
+	if (x) { PicoCpuFS68k.execinfo |= FM68K_HALTED; SekEndRunS68k(0); } \
 }
 #define SekIsStoppedM68k() (PicoCpuFM68k.execinfo&FM68K_HALTED)
 #define SekIsStoppedS68k() (PicoCpuFS68k.execinfo&FM68K_HALTED)
@@ -102,11 +102,11 @@ extern m68ki_cpu_core PicoCpuMM68k, PicoCpuMS68k;
 #define SekSr     m68k_get_reg(&PicoCpuMM68k, M68K_REG_SR)
 #define SekSrS68k m68k_get_reg(&PicoCpuMS68k, M68K_REG_SR)
 #define SekSetStop(x) { \
-	if(x) { PicoCpuMM68k.cyc_remaining_cycles = 0; PicoCpuMM68k.stopped=STOP_LEVEL_STOP; } \
+	if(x) { PicoCpuMM68k.stopped=STOP_LEVEL_STOP; SekEndRun(0)} \
 	else PicoCpuMM68k.stopped=0; \
 }
 #define SekSetStopS68k(x) { \
-	if(x) { PicoCpuMS68k.cyc_remaining_cycles = 0; PicoCpuMS68k.stopped=STOP_LEVEL_STOP; } \
+	if(x) { PicoCpuMS68k.stopped=STOP_LEVEL_STOP; SekEndRunS68k(0); } \
 	else PicoCpuMS68k.stopped=0; \
 }
 #define SekIsStoppedM68k() (PicoCpuMM68k.stopped==STOP_LEVEL_STOP)
@@ -506,7 +506,12 @@ struct mcd_pcm
 	} ch[8];
 };
 
-#define PCD_ST_S68K_RST 1
+#define PCD_ST_S68K_RST     1
+#define PCD_ST_S68K_SYNC    2
+#define PCD_ST_S68K_SLEEP   4
+#define PCD_ST_S68K_POLL   16
+#define PCD_ST_M68K_POLL   32
+#define PCD_ST_S68K_IFL2   0x100
 
 struct mcd_misc
 {
@@ -560,9 +565,6 @@ typedef struct
   char pcm_mixbuf_dirty;
   char pcm_regs_dirty;
 } mcd_state;
-
-// XXX: this will need to be reworked for cart+cd support.
-#define Pico_mcd ((mcd_state *)Pico.rom)
 
 // 32X
 #define P32XS_FM    (1<<15)
@@ -694,6 +696,7 @@ int CM_compareRun(int cyc, int is_sub);
 // draw.c
 void PicoDrawInit(void);
 PICO_INTERNAL void PicoFrameStart(void);
+void PicoDrawRefreshSprites(void);
 void PicoDrawSync(int to, int blank_last_line, int limit_sprites);
 void BackFill(int reg7, int sh, struct PicoEState *est);
 void FinalizeLine555(int sh, int line, struct PicoEState *est);
@@ -767,6 +770,7 @@ int gfx_context_load(const unsigned char *state);
 void DmaSlowCell(u32 source, u32 a, int len, unsigned char inc);
 
 // cd/memory.c
+extern unsigned int pcd_base_address;
 PICO_INTERNAL void PicoMemSetupCD(void);
 u32 PicoRead8_mcd_io(u32 a);
 u32 PicoRead16_mcd_io(u32 a);
@@ -791,6 +795,8 @@ PICO_INTERNAL void PicoSyncZ80(unsigned int m68k_cycles_done);
 #define PCDS_IEN5     (1<<5)
 #define PCDS_IEN6     (1<<6)
 
+extern mcd_state *Pico_mcd;
+
 PICO_INTERNAL void PicoInitMCD(void);
 PICO_INTERNAL void PicoExitMCD(void);
 PICO_INTERNAL void PicoPowerMCD(void);
@@ -805,6 +811,7 @@ enum pcd_event {
   PCD_EVENT_COUNT,
 };
 extern unsigned int pcd_event_times[PCD_EVENT_COUNT];
+
 void pcd_event_schedule(unsigned int now, enum pcd_event event, int after);
 void pcd_event_schedule_s68k(enum pcd_event event, int after);
 void pcd_prepare_frame(void);
@@ -916,6 +923,7 @@ int PicoVideoFIFOHint(void);
 void PicoVideoFIFOMode(int active, int h40);
 int PicoVideoFIFOWrite(int count, int byte_p, unsigned sr_mask, unsigned sr_flags);
 void PicoVideoInit(void);
+void PicoVideoSync(int skip);
 void PicoVideoSave(void);
 void PicoVideoLoad(void);
 void PicoVideoCacheSAT(int load);
@@ -1012,14 +1020,14 @@ void PicoMemSetup32x(void);
 void Pico32xSwapDRAM(int b);
 void Pico32xMemStateLoaded(void);
 void p32x_update_banks(void);
-void p32x_m68k_poll_event(u32 flags);
+void p32x_m68k_poll_event(u32 a, u32 flags);
 u32 REGPARM(3) p32x_sh2_poll_memory8(u32 a, u32 d, SH2 *sh2);
 u32 REGPARM(3) p32x_sh2_poll_memory16(u32 a, u32 d, SH2 *sh2);
 u32 REGPARM(3) p32x_sh2_poll_memory32(u32 a, u32 d, SH2 *sh2);
 void *p32x_sh2_get_mem_ptr(u32 a, u32 *mask, SH2 *sh2);
 int p32x_sh2_mem_is_rom(u32 a, SH2 *sh2);
 void p32x_sh2_poll_detect(u32 a, SH2 *sh2, u32 flags, int maxcnt);
-void p32x_sh2_poll_event(SH2 *sh2, u32 flags, u32 m68k_cycles);
+void p32x_sh2_poll_event(u32 a, SH2 *sh2, u32 flags, u32 m68k_cycles);
 int p32x_sh2_memcpy(u32 dst, u32 src, int count, int size, SH2 *sh2);
 
 // 32x/draw.c

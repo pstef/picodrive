@@ -625,7 +625,7 @@ void retro_set_environment(retro_environment_t cb)
 
    static const struct retro_system_content_info_override content_overrides[] = {
       {
-         "gen|smd|md|32x|sms|gg|sg|sc|68k|sgd|pco", /* extensions */
+         "bin|gen|smd|md|32x|sms|gg|sg|sc|68k|sgd|pco", /* extensions */
 #if defined(LOW_MEMORY)
          true,                         /* need_fullpath */
 #else
@@ -670,12 +670,7 @@ void retro_get_system_info(struct retro_system_info *info)
 {
    memset(info, 0, sizeof(*info));
    info->library_name = "PicoDrive";
-#ifndef GIT_VERSION
-#define _GIT_VERSION ""
-#else
-#define _GIT_VERSION "-" GIT_VERSION
-#endif
-   info->library_version = VERSION _GIT_VERSION;
+   info->library_version = VERSION;
    info->valid_extensions = "bin|gen|smd|md|32x|cue|iso|chd|sms|gg|sg|sc|m3u|68k|sgd|pco";
    info->need_fullpath = true;
 }
@@ -1278,6 +1273,22 @@ static const char *find_bios(int *region, const char *cd_fname)
    static char path[256];
    int i, count;
    FILE *f = NULL;
+
+   // look for MSU.MD rom file. XXX another extension list? ugh...
+   static const char *md_exts[] = { "gen", "smd", "md", "32x" };
+   char *ext = strrchr(cd_fname, '.');
+   int extpos = ext ? ext-cd_fname : strlen(cd_fname);
+   strcpy(path, cd_fname);
+   path[extpos++] = '.';
+   for (i = 0; i < ARRAY_SIZE(md_exts); i++) {
+      strcpy(path+extpos, md_exts[i]);
+      f = fopen(path, "rb");
+      if (f != NULL) {
+         log_cb(RETRO_LOG_INFO, "found MSU rom: %s\n", path);
+	 fclose(f);
+         return path;
+      }
+   }
 
    if (*region == 4) { // US
       files = biosfiles_us;

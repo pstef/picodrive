@@ -384,7 +384,8 @@ enum media_type_e PicoLoadMedia(const char *filename,
       media_type = PM_BAD_CD;
       goto out;
     }
-    Pico.m.ncart_in = 1;
+    if (Pico.romsize <= 0x20000)
+      Pico.m.ncart_in = 1;
   }
 
   if (PicoIn.quirks & PQUIRK_FORCE_6BTN)
@@ -394,7 +395,7 @@ out:
   if (rom_file)
     pm_close(rom_file);
   if (rom_data)
-    free(rom_data);
+    PicoCartUnload();
   return media_type;
 }
 

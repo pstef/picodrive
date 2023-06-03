@@ -54,14 +54,16 @@ void p32x_update_irls(SH2 *active_sh2, unsigned int m68k_cycles)
 
   mrun = sh2_irl_irq(&msh2, mlvl, msh2.state & SH2_STATE_RUN);
   if (mrun) {
-    p32x_sh2_poll_event(&msh2, SH2_IDLE_STATES & ~SH2_STATE_SLEEP, m68k_cycles);
-    p32x_sync_other_sh2(&msh2, m68k_cycles);
+    p32x_sh2_poll_event(msh2.poll_addr, &msh2, SH2_IDLE_STATES & ~SH2_STATE_SLEEP, m68k_cycles);
+    if (msh2.state & SH2_STATE_RUN)
+      sh2_end_run(&msh2, 0);
   }
 
   srun = sh2_irl_irq(&ssh2, slvl, ssh2.state & SH2_STATE_RUN);
   if (srun) {
-    p32x_sh2_poll_event(&ssh2, SH2_IDLE_STATES & ~SH2_STATE_SLEEP, m68k_cycles);
-    p32x_sync_other_sh2(&ssh2, m68k_cycles);
+    p32x_sh2_poll_event(ssh2.poll_addr, &ssh2, SH2_IDLE_STATES & ~SH2_STATE_SLEEP, m68k_cycles);
+    if (ssh2.state & SH2_STATE_RUN)
+      sh2_end_run(&ssh2, 0);
   }
 
   elprintf(EL_32X, "update_irls: m %d/%d, s %d/%d", mlvl, mrun, slvl, srun);
@@ -135,10 +137,9 @@ void p32x_reset_sh2s(void)
   if (p32x_bios_m == NULL) {
     sh2_set_gbr(0, 0x20004000);
 
-    if (!(PicoIn.AHW & PAHW_MCD)) {
+    if (!Pico.m.ncart_in) { // copy IDL from cartridge
       unsigned int idl_src, idl_dst, idl_size; // initial data load
       unsigned int vbr;
-
       // initial data
       idl_src = CPU_BE2(*(u32 *)(Pico.rom + 0x3d4)) & ~0xf0000000;
       idl_dst = CPU_BE2(*(u32 *)(Pico.rom + 0x3d8)) & ~0xf0000000;
@@ -206,8 +207,8 @@ void PicoReset32x(void)
 {
   if (PicoIn.AHW & PAHW_32X) {
     p32x_trigger_irq(NULL, SekCyclesDone(), P32XI_VRES);
-    p32x_sh2_poll_event(&msh2, SH2_IDLE_STATES, SekCyclesDone());
-    p32x_sh2_poll_event(&ssh2, SH2_IDLE_STATES, SekCyclesDone());
+    p32x_sh2_poll_event(msh2.poll_addr, &msh2, SH2_IDLE_STATES, SekCyclesDone());
+    p32x_sh2_poll_event(ssh2.poll_addr, &ssh2, SH2_IDLE_STATES, SekCyclesDone());
     p32x_pwm_ctl_changed();
     p32x_timers_recalc();
     Pico32x.vdp_regs[0] &= ~P32XV_Mx; // 32X graphics disabled
@@ -255,8 +256,8 @@ static void p32x_start_blank(void)
   }
 
   p32x_trigger_irq(NULL, Pico.t.m68c_aim, P32XI_VINT);
-  p32x_sh2_poll_event(&msh2, SH2_STATE_VPOLL, Pico.t.m68c_aim);
-  p32x_sh2_poll_event(&ssh2, SH2_STATE_VPOLL, Pico.t.m68c_aim);
+  p32x_sh2_poll_event(msh2.poll_addr, &msh2, SH2_STATE_VPOLL, Pico.t.m68c_aim);
+  p32x_sh2_poll_event(ssh2.poll_addr, &ssh2, SH2_STATE_VPOLL, Pico.t.m68c_aim);
 }
 
 static void p32x_end_blank(void)
@@ -266,10 +267,10 @@ static void p32x_end_blank(void)
   if ((Pico32x.vdp_regs[0] & P32XV_Mx) != 0) // no forced blanking
     Pico32x.vdp_regs[0x0a/2] &= ~P32XV_PEN; // no palette access
   if (!(Pico32x.sh2_regs[0] & 0x80))
-    p32x_schedule_hint(NULL, SekCyclesDone());
+    p32x_schedule_hint(NULL, Pico.t.m68c_aim);
 
-  p32x_sh2_poll_event(&msh2, SH2_STATE_VPOLL, Pico.t.m68c_aim);
-  p32x_sh2_poll_event(&ssh2, SH2_STATE_VPOLL, Pico.t.m68c_aim);
+  p32x_sh2_poll_event(msh2.poll_addr, &msh2, SH2_STATE_VPOLL, Pico.t.m68c_aim);
+  p32x_sh2_poll_event(ssh2.poll_addr, &ssh2, SH2_STATE_VPOLL, Pico.t.m68c_aim);
 }
 
 void p32x_schedule_hint(SH2 *sh2, unsigned int m68k_cycles)
@@ -292,8 +293,8 @@ void p32x_schedule_hint(SH2 *sh2, unsigned int m68k_cycles)
 static void fillend_event(unsigned int now)
 {
   Pico32x.vdp_regs[0x0a/2] &= ~P32XV_nFEN;
-  p32x_sh2_poll_event(&msh2, SH2_STATE_VPOLL, now);
-  p32x_sh2_poll_event(&ssh2, SH2_STATE_VPOLL, now);
+  p32x_sh2_poll_event(msh2.poll_addr, &msh2, SH2_STATE_VPOLL, now);
+  p32x_sh2_poll_event(ssh2.poll_addr, &ssh2, SH2_STATE_VPOLL, now);
 }
 
 static void hint_event(unsigned int now)
@@ -587,6 +588,8 @@ void PicoFrame32x(void)
     pcd_prepare_frame();
 
   PicoFrameStart();
+  if (Pico32xDrawMode != PDM32X_BOTH)
+    Pico.est.rendstatus |= PDRAW_SYNC_NEEDED;
   PicoFrameHints();
 
   elprintf(EL_32X, "poll: %02x %02x %02x",
