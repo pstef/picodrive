@@ -70,7 +70,7 @@ SOURCES_C := $(LIBRETRO_DIR)/libretro.c \
 
 COREFLAGS := $(addprefix -D,$(DEFINES)) -fno-strict-aliasing -DUSE_LIBCHDR=1 -D_7ZIP_ST -I$(CORE_DIR)/pico/cd/libchdr/include -I$(CORE_DIR)/pico/cd/libchdr/deps/lzma-19.00/include
 
-GIT_REVISION := $(shell git rev-parse --short HEAD || echo unknown)
+GIT_REVISION := -$(shell git rev-parse --short HEAD || echo unknown)
 COREFLAGS += -DREVISION=\"$(GIT_REVISION)\"
 
 ifneq ($(filter armeabi%, $(TARGET_ARCH_ABI)),)
