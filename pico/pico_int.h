@@ -205,7 +205,7 @@ extern struct DrZ80 drZ80;
   (Pico.t.z80c_aim - z80_cyclesLeft)
 
 // one line has 488 68K cycles and 228 Z80 cycles, 228/488*8192=3827
-#define cycles_68k_to_z80(x) ((x) * 3857 >> 13)
+#define cycles_68k_to_z80(x) ((x) * 3847 >> 13)
 
 // ----------------------- SH2 CPU -----------------------
 
@@ -996,6 +996,7 @@ void Pico32xStartup(void);
 void PicoUnload32x(void);
 void PicoFrame32x(void);
 void Pico32xStateLoaded(int is_early);
+void Pico32xPrepare(void);
 void p32x_sync_sh2s(unsigned int m68k_target);
 void p32x_sync_other_sh2(SH2 *sh2, unsigned int m68k_target);
 void p32x_update_irls(SH2 *active_sh2, unsigned int m68k_cycles);
