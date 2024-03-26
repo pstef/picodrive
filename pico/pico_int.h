@@ -91,6 +91,9 @@ extern M68K_CONTEXT PicoCpuFM68k, PicoCpuFS68k;
 
 #ifdef EMU_M68K
 #include <cpu/musashi/m68kcpu.h>
+#undef INLINE
+#undef USE_CYCLES
+#undef ADD_CYCLES
 extern m68ki_cpu_core PicoCpuMM68k, PicoCpuMS68k;
 #ifndef SekCyclesLeft
 #define SekCyclesLeft     PicoCpuMM68k.cyc_remaining_cycles
@@ -166,7 +169,7 @@ extern struct DrZ80 drZ80;
 #define z80_run(cycles)    ((cycles) - DrZ80Run(&drZ80, cycles))
 #define z80_run_nr(cycles) DrZ80Run(&drZ80, cycles)
 #define z80_int()          drZ80.Z80_IRQ = 1
-#define z80_int_assert(a)  drZ80.Z80_IRQ = (a)
+#define z80_int_assert(a)  drZ80.Z80_IRQ = (a ? 2 : 0)
 #define z80_nmi()          drZ80.Z80IF |= 8
 
 #define z80_cyclesLeft     drZ80.cycles
@@ -457,6 +460,7 @@ struct PicoTiming
 
   int timer_a_next_oflow, timer_a_step; // in z80 cycles
   int timer_b_next_oflow, timer_b_step;
+  int ym2612_busy;
 
   int vcnt_wrap, vcnt_adj;
 };
@@ -736,6 +740,7 @@ void PicoDrawSetOutputSMS(pdso_t which);
 
 // memory.c
 PICO_INTERNAL void PicoMemSetup(void);
+PICO_INTERNAL u32 PicoRead16_floating(u32 a);
 u32 PicoRead8_io(u32 a);
 u32 PicoRead16_io(u32 a);
 void PicoWrite8_io(u32 a, u32 d);
@@ -897,6 +902,8 @@ void ym2612_unpack_state(void);
 #define TIMER_B_TICK_ZCYCLES cycles_68k_to_z80(256LL*16*72*2) // Q8
 
 #define timers_cycle(ticks) \
+  if (Pico.t.ym2612_busy > 0) \
+    Pico.t.ym2612_busy -= ticks << 8; \
   if (Pico.t.timer_a_next_oflow < TIMER_NO_OFLOW) \
     Pico.t.timer_a_next_oflow -= ticks << 8; \
   if (Pico.t.timer_b_next_oflow < TIMER_NO_OFLOW) \
@@ -904,6 +911,7 @@ void ym2612_unpack_state(void);
   ym2612_sync_timers(0, ym2612.OPN.ST.mode, ym2612.OPN.ST.mode);
 
 #define timers_reset() \
+  Pico.t.ym2612_busy = 0; \
   Pico.t.timer_a_next_oflow = Pico.t.timer_b_next_oflow = TIMER_NO_OFLOW; \
   Pico.t.timer_a_step = TIMER_A_TICK_ZCYCLES * 1024; \
   Pico.t.timer_b_step = TIMER_B_TICK_ZCYCLES * 256; \

@@ -187,7 +187,7 @@ static const char * const chunk_names[CHUNK_DEFAULT_COUNT] = {
   "32X events",
 };
 
-static int write_chunk(chunk_name_e name, int len, void *data, void *file)
+static int write_chunk(unsigned char name, int len, void *data, void *file)
 {
   size_t bwritten = 0;
   bwritten += areaWrite(&name, 1, 1, file);
@@ -605,12 +605,13 @@ readend:
     Pico32xStateLoaded(0);
   if (PicoIn.AHW & PAHW_MCD)
     pcd_state_loaded();
+  if (!(PicoIn.AHW & PAHW_SMS)) {
+    Pico.video.status &= ~(SR_VB | SR_F);
+    Pico.video.status |= ((Pico.video.reg[1] >> 3) ^ SR_VB) & SR_VB;
+    Pico.video.status |= (Pico.video.pending_ints << 2) & SR_F;
+  }
 
   Pico.m.dirtyPal = 1;
-  Pico.video.status &= ~(SR_VB | SR_F);
-  Pico.video.status |= ((Pico.video.reg[1] >> 3) ^ SR_VB) & SR_VB;
-  Pico.video.status |= (Pico.video.pending_ints << 2) & SR_F;
-
   retval = 0;
 
 out:

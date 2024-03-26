@@ -199,16 +199,25 @@ void cpu68k_map_all_funcs(u32 start_addr, u32 end_addr, u32 (*r8)(u32), u32 (*r1
     r8map[i] = ar8, r16map[i] = ar16, w8map[i] = aw8, w16map[i] = aw16;
 }
 
+u32 PicoRead16_floating(u32 a)
+{
+  // faking open bus
+  u32 d = (Pico.m.rotate += 0x41);
+  d ^= (d << 5) ^ (d << 8);
+  if ((a & 0xff0000) == 0xa10000) d = 0; // MegaCD pulldowns don't work here curiously
+  return (PicoIn.AHW & PAHW_MCD) ? 0x00 : d; // pulldown if MegaCD2 attached
+}
+
 static u32 m68k_unmapped_read8(u32 a)
 {
   elprintf(EL_UIO, "m68k unmapped r8  [%06x] @%06x", a, SekPc);
-  return (PicoIn.AHW & PAHW_MCD) ? 0x00 : 0xff; // pulldown if MegaCD2 attached
+  return (u8)PicoRead16_floating(a);
 }
 
 static u32 m68k_unmapped_read16(u32 a)
 {
   elprintf(EL_UIO, "m68k unmapped r16 [%06x] @%06x", a, SekPc);
-  return (PicoIn.AHW & PAHW_MCD) ? 0x00 : 0xffff;
+  return PicoRead16_floating(a);
 }
 
 static void m68k_unmapped_write8(u32 a, u32 d)
@@ -521,13 +530,19 @@ void NOINLINE ctl_write_z80busreq(u32 d)
   {
     if (d)
     {
-      Pico.t.z80c_cnt = z80_cycles_from_68k() + 2;
+      Pico.t.z80c_cnt = z80_cycles_from_68k() + (Pico.t.z80_busdelay >> 8);
+      Pico.t.z80_busdelay &= 0xff;
     }
     else
     {
       if ((PicoIn.opt & POPT_EN_Z80) && !Pico.m.z80_reset) {
+        // Z80 grants bus 2 cycles after the next M cycle, even within an insn
+        // simulate this by accumulating the last insn overhang in busdelay
+        unsigned granted = z80_cycles_from_68k() + 6;
         pprof_start(m68k);
         PicoSyncZ80(SekCyclesDone());
+        Pico.t.z80_busdelay += (Pico.t.z80c_cnt - granted) << 8;
+        Pico.t.z80c_cnt = granted;
         pprof_end_sub(m68k);
       }
     }
@@ -674,20 +689,22 @@ static void PicoWrite16_sram(u32 a, u32 d)
 // TODO: verify mirrors VDP and bank reg (bank area mirroring verified)
 static u32 PicoRead8_z80(u32 a)
 {
-  u32 d = 0xff;
-  if (((Pico.m.z80Run & 1) || Pico.m.z80_reset) && !(PicoIn.quirks & PQUIRK_NO_Z80_BUS_LOCK)) {
+  u32 d;
+  if ((Pico.m.z80Run | Pico.m.z80_reset | (z80_cycles_from_68k() < Pico.t.z80c_cnt)) &&
+      !(PicoIn.quirks & PQUIRK_NO_Z80_BUS_LOCK)) {
     elprintf(EL_ANOMALY, "68k z80 read with no bus! [%06x] @ %06x", a, SekPc);
-    // open bus. Pulled down if MegaCD2 is attached.
-    return 0;
+    return (u8)PicoRead16_floating(a);
   }
+  SekCyclesBurnRun(1);
 
   if ((a & 0x4000) == 0x0000) {
-    SekCyclesBurnRun(1);
     d = PicoMem.zram[a & 0x1fff];
   } else if ((a & 0x6000) == 0x4000) // 0x4000-0x5fff
     d = ym2612_read_local_68k(); 
-  else
+  else {
     elprintf(EL_UIO|EL_ANOMALY, "68k bad read [%06x] @%06x", a, SekPc);
+    d = (u8)PicoRead16_floating(a);
+  }
   return d;
 }
 
@@ -699,14 +716,14 @@ static u32 PicoRead16_z80(u32 a)
 
 static void PicoWrite8_z80(u32 a, u32 d)
 {
-  if (((Pico.m.z80Run & 1) || Pico.m.z80_reset) && !(PicoIn.quirks & PQUIRK_NO_Z80_BUS_LOCK)) {
+  if ((Pico.m.z80Run | Pico.m.z80_reset) && !(PicoIn.quirks & PQUIRK_NO_Z80_BUS_LOCK)) {
     // verified on real hw
     elprintf(EL_ANOMALY, "68k z80 write with no bus or reset! [%06x] %02x @ %06x", a, d&0xff, SekPc);
     return;
   }
+  SekCyclesBurnRun(1);
 
   if ((a & 0x4000) == 0x0000) { // z80 RAM
-    SekCyclesBurnRun(1);
     PicoMem.zram[a & 0x1fff] = (u8)d;
     return;
   }
@@ -750,18 +767,18 @@ u32 PicoRead8_io(u32 a)
     goto end;
   }
 
-  // faking open bus (MegaCD pulldowns don't work here curiously)
-  d = Pico.m.rotate++;
-  d ^= d << 6;
+  d = PicoRead16_floating(a);
 
   if ((a & 0xfc00) == 0x1000) {
-    // bit8 seems to be readable in this range
-    if (!(a & 1))
-      d &= ~0x01;
-
     if ((a & 0xff01) == 0x1100) { // z80 busreq (verified)
-      d |= (Pico.m.z80Run | Pico.m.z80_reset) & 1;
-      elprintf(EL_BUSREQ, "get_zrun: %02x [%u] @%06x", d, SekCyclesDone(), SekPc);
+      // bit8 seems to be readable in this range
+      if (!(a & 1)) {
+        d &= ~0x01;
+        // Z80 ahead of 68K only if in BUSREQ, BUSACK only after 68K reached Z80
+        d |= (z80_cycles_from_68k() < Pico.t.z80c_cnt);
+        d |= (Pico.m.z80Run | Pico.m.z80_reset) & 1;
+        elprintf(EL_BUSREQ, "get_zrun: %02x [%u] @%06x", d, SekCyclesDone(), SekPc);
+      }
     }
     goto end;
   }
@@ -782,15 +799,13 @@ u32 PicoRead16_io(u32 a)
     goto end;
   }
 
-  // faking open bus
-  d = (Pico.m.rotate += 0x41);
-  d ^= (d << 5) ^ (d << 8);
+  d = PicoRead16_floating(a);
 
   // bit8 seems to be readable in this range
   if ((a & 0xfc00) == 0x1000) {
-    d &= ~0x0100;
-
     if ((a & 0xff00) == 0x1100) { // z80 busreq
+      d &= ~0x0100;
+      d |= (z80_cycles_from_68k() < Pico.t.z80c_cnt) << 8;
       d |= ((Pico.m.z80Run | Pico.m.z80_reset) & 1) << 8;
       elprintf(EL_BUSREQ, "get_zrun: %04x [%u] @%06x", d, SekCyclesDone(), SekPc);
     }
@@ -855,22 +870,25 @@ void PicoWrite16_io(u32 a, u32 d)
 // TODO: verify if lower byte goes to PSG on word writes
 u32 PicoRead8_vdp(u32 a)
 {
+  u32 d;
   if ((a & 0x00f0) == 0x0000) {
     switch (a & 0x0d)
     {
-      case 0x00: return PicoVideoRead8DataH(0);
-      case 0x01: return PicoVideoRead8DataL(0);
-      case 0x04: return PicoVideoRead8CtlH(0);
-      case 0x05: return PicoVideoRead8CtlL(0);
+      case 0x00: d = PicoVideoRead8DataH(0); break;
+      case 0x01: d = PicoVideoRead8DataL(0); break;
+      case 0x04: d = PicoVideoRead8CtlH(0); break;
+      case 0x05: d = PicoVideoRead8CtlL(0); break;
       case 0x08:
-      case 0x0c: return PicoVideoRead8HV_H(0);
+      case 0x0c: d = PicoVideoRead8HV_H(0); break;
       case 0x09:
-      case 0x0d: return PicoVideoRead8HV_L(0);
+      case 0x0d: d = PicoVideoRead8HV_L(0); break;
+      default:   d = (u8)PicoRead16_floating(a); break;
     }
+  } else {
+    elprintf(EL_UIO|EL_ANOMALY, "68k bad read [%06x] @%06x", a, SekPc);
+    d = (u8)PicoRead16_floating(a);
   }
-
-  elprintf(EL_UIO|EL_ANOMALY, "68k bad read [%06x] @%06x", a, SekPc);
-  return 0;
+  return d;
 }
 
 static u32 PicoRead16_vdp(u32 a)
@@ -1064,6 +1082,8 @@ static int get_scanline(int is_from_z80)
 }
 
 #define ym2612_update_status(xcycles) \
+  ym2612.OPN.ST.status &= ~0x80; \
+  ym2612.OPN.ST.status |= (xcycles < Pico.t.ym2612_busy) * 0x80; \
   if (xcycles >= Pico.t.timer_a_next_oflow) \
     ym2612.OPN.ST.status |= (ym2612.OPN.ST.mode >> 2) & 1; \
   if (xcycles >= Pico.t.timer_b_next_oflow) \
@@ -1093,7 +1113,7 @@ void ym2612_sync_timers(int z80_cycles, int mode_old, int mode_new)
        * Starting a timer takes place at the next tick, so xcycles needs to be
        * rounded up to that: t = next tick# = (xcycles / TICK_ZCYCLES) + 1
        */
-      unsigned t = ((xcycles * (((1<<20)/TIMER_A_TICK_ZCYCLES)+1))>>20) + 1;
+      unsigned t = ((xcycles * (((1LL<<32)/TIMER_A_TICK_ZCYCLES)+1))>>32) + 1;
       Pico.t.timer_a_next_oflow = t*TIMER_A_TICK_ZCYCLES + Pico.t.timer_a_step;
     }
   }
@@ -1116,7 +1136,7 @@ void ym2612_sync_timers(int z80_cycles, int mode_old, int mode_new)
        * reset by loading timer b. The first run of timer b after loading is
        * therefore shorter by up to 15 ticks.
        */
-      unsigned t = ((xcycles * (((1<<20)/TIMER_A_TICK_ZCYCLES)+1))>>20) + 1;
+      unsigned t = ((xcycles * (((1LL<<32)/TIMER_A_TICK_ZCYCLES)+1))>>32) + 1;
       int step = Pico.t.timer_b_step - TIMER_A_TICK_ZCYCLES*(t&15);
       Pico.t.timer_b_next_oflow = t*TIMER_A_TICK_ZCYCLES + step;
     }
@@ -1129,6 +1149,7 @@ void ym2612_sync_timers(int z80_cycles, int mode_old, int mode_new)
 // ym2612 DAC and timer I/O handlers for z80
 static int ym2612_write_local(u32 a, u32 d, int is_from_z80)
 {
+  int cycles = is_from_z80 ? z80_cyclesDone() : z80_cycles_from_68k();
   int addr;
 
   a &= 3;
@@ -1148,6 +1169,10 @@ static int ym2612_write_local(u32 a, u32 d, int is_from_z80)
       addr = ym2612.OPN.ST.address | ((int)ym2612.addr_A1 << 8);
       ym2612.REGS[addr] = d;
 
+      // the busy flag in the YM2612 status is actually a 32 cycle timer
+      // (89.6 Z80 cycles), triggered by any write to the data port.
+      Pico.t.ym2612_busy = (cycles + 90) << 8; // Q8 for convenience
+
       switch (addr)
       {
         case 0x24: // timer A High 8
@@ -1156,7 +1181,6 @@ static int ym2612_write_local(u32 a, u32 d, int is_from_z80)
                                      : ((ym2612.OPN.ST.TA & 0x3fc)|(d&3));
           if (ym2612.OPN.ST.TA != TAnew)
           {
-            int cycles = is_from_z80 ? z80_cyclesDone() : z80_cycles_from_68k();
             ym2612_sync_timers(cycles, ym2612.OPN.ST.mode, ym2612.OPN.ST.mode);
             //elprintf(EL_STATUS, "timer a set %i", TAnew);
             ym2612.OPN.ST.TA = TAnew;
@@ -1169,7 +1193,6 @@ static int ym2612_write_local(u32 a, u32 d, int is_from_z80)
         }
         case 0x26: // timer B
           if (ym2612.OPN.ST.TB != d) {
-            int cycles = is_from_z80 ? z80_cyclesDone() : z80_cycles_from_68k();
             ym2612_sync_timers(cycles, ym2612.OPN.ST.mode, ym2612.OPN.ST.mode);
             //elprintf(EL_STATUS, "timer b set %i", d);
             ym2612.OPN.ST.TB = d;
@@ -1181,7 +1204,6 @@ static int ym2612_write_local(u32 a, u32 d, int is_from_z80)
           return 0;
         case 0x27: { /* mode, timer control */
           int old_mode = ym2612.OPN.ST.mode;
-          int cycles = is_from_z80 ? z80_cyclesDone() : z80_cycles_from_68k();
 
           elprintf(EL_YMTIMER, "st mode %02x", d);
           ym2612_sync_timers(cycles, old_mode, d);
@@ -1206,7 +1228,6 @@ static int ym2612_write_local(u32 a, u32 d, int is_from_z80)
           return 0;
         }
         case 0x2a: { /* DAC data */
-          int cycles = is_from_z80 ? z80_cyclesDone() : z80_cycles_from_68k();
           //elprintf(EL_STATUS, "%03i dac w %08x z80 %i", cycles, d, is_from_z80);
           if (ym2612.dacen)
             PsndDoDAC(cycles);
@@ -1228,7 +1249,7 @@ static int ym2612_write_local(u32 a, u32 d, int is_from_z80)
   if (PicoIn.opt & POPT_EXT_FM)
     return YM2612Write_940(a, d, get_scanline(is_from_z80));
 #endif
-  PsndDoFM(is_from_z80 ? z80_cyclesDone() : z80_cycles_from_68k());
+  PsndDoFM(cycles);
   return YM2612Write_(a, d);
 }
 
@@ -1345,13 +1366,18 @@ void PicoWrite16_32x(u32 a, u32 d) {}
 
 static void access_68k_bus(int delay) // bus delay as Q8
 {
+  // TODO: if the 68K is in DMA wait, Z80 has to wait until DMA ends
+  if (Pico.video.status & (PVS_CPUWR|PVS_CPURD))
+    z80_subCLeft(z80_cyclesLeft); // rather rough on both condition and action
+
   // 68k bus access delay for z80. The fractional part needs to be accumulated
   // until an additional cycle is full. That is then added to the integer part.
-  Pico.t.z80_busdelay = (delay&0xff) + (Pico.t.z80_busdelay&0xff); // accumulate
+  Pico.t.z80_busdelay += (delay&0xff); // accumulate
   z80_subCLeft((delay>>8) + (Pico.t.z80_busdelay>>8));
+  Pico.t.z80_busdelay &= 0xff; // leftover cycle fraction
   // don't use SekCyclesBurn() here since the Z80 doesn't run in cycle lock to
   // the 68K. Count the stolen cycles to be accounted later in the 68k CPU runs
-  Pico.t.z80_buscycles += 7;
+  Pico.t.z80_buscycles += 8;
 }
 
 static unsigned char z80_md_vdp_read(unsigned short a)
@@ -1380,7 +1406,7 @@ static unsigned char z80_md_vdp_read(unsigned short a)
 static unsigned char z80_md_bank_read(unsigned short a)
 {
   unsigned int addr68k;
-  unsigned char ret;
+  unsigned char ret = 0xff;
 
   // 68k bus access delay=3.3 per kabuto, but for notaz picotest 3.02<delay<3.32
   access_68k_bus(0x340); // Q8, picotest: 0x306(>3.02)-0x351(<3.32)
@@ -1388,7 +1414,8 @@ static unsigned char z80_md_bank_read(unsigned short a)
   addr68k = Pico.m.z80_bank68k << 15;
   addr68k |= a & 0x7fff;
 
-  ret = m68k_read8(addr68k);
+  if (addr68k < 0xe00000) // can't read from 68K RAM
+    ret = m68k_read8(addr68k);
 
   elprintf(EL_Z80BNK, "z80->68k r8 [%06x] %02x", addr68k, ret);
   return ret;

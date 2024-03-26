@@ -71,6 +71,10 @@ CFLAGS += $(call chkCCflag, -fno-caller-saves -fno-guess-branch-probability -fno
 # very old gcc toolchains may not have these options
 CFLAGS += $(call chkCCflag, -fno-tree-loop-if-convert -fipa-pta -fno-ipa-cp)
 endif
+else
+ifneq ($(STATIC_LINKING), 1)
+CFLAGS += $(call chkCCflag, -flto)
+endif
 endif
 
 # revision info from repository if this not a tagged release
@@ -147,10 +151,6 @@ $(TARGET).opk: .od_data
 	mksquashfs .od_data $@ -all-root -noappend -no-exports -no-xattrs
 all: $(TARGET).opk
 endif
-endif
-
-ifneq (,$(filter %mips32r2, $(CFLAGS)))
-CFLAGS += -DMIPS_USE_SYNCI # mips32r2 clear_cache uses SYNCI instead of a syscall
 endif
 
 OBJS += platform/opendingux/inputmap.o
@@ -237,21 +237,35 @@ OBJS += platform/psp/asm_utils.o
 OBJS += platform/psp/mp3.o
 USE_FRONTEND = 1
 endif
+ifeq "$(PLATFORM)" "ps2"
+CFLAGS += -DUSE_BGR555 # -DLOG_TO_FILE
+LDLIBS += -lpatches -lgskit -ldmakit -lps2_drivers
+OBJS += platform/ps2/plat.o
+OBJS += platform/ps2/emu.o
+OBJS += platform/ps2/in_ps2.o
+USE_FRONTEND = 1
+endif
 ifeq "$(PLATFORM)" "libretro"
 OBJS += platform/libretro/libretro.o
 ifneq ($(STATIC_LINKING), 1)
-OBJS += platform/libretro/libretro-common/compat/compat_strcasestr.o
-ifeq "$(USE_LIBRETRO_VFS)" "1"
-OBJS += platform/libretro/libretro-common/compat/compat_posix_string.o
-OBJS += platform/libretro/libretro-common/compat/compat_strl.o
-OBJS += platform/libretro/libretro-common/compat/fopen_utf8.o
-OBJS += platform/libretro/libretro-common/encodings/encoding_utf.o
-OBJS += platform/libretro/libretro-common/string/stdstring.o
-OBJS += platform/libretro/libretro-common/time/rtime.o
-OBJS += platform/libretro/libretro-common/streams/file_stream.o
-OBJS += platform/libretro/libretro-common/streams/file_stream_transforms.o
+CFLAGS += -DHAVE_ZLIB
+OBJS += platform/libretro/libretro-common/formats/png/rpng.o
+OBJS += platform/libretro/libretro-common/streams/trans_stream.o
+OBJS += platform/libretro/libretro-common/streams/trans_stream_pipe.o
+OBJS += platform/libretro/libretro-common/streams/trans_stream_zlib.o
+OBJS += platform/libretro/libretro-common/file/file_path_io.o
 OBJS += platform/libretro/libretro-common/file/file_path.o
 OBJS += platform/libretro/libretro-common/vfs/vfs_implementation.o
+OBJS += platform/libretro/libretro-common/time/rtime.o
+OBJS += platform/libretro/libretro-common/string/stdstring.o
+OBJS += platform/libretro/libretro-common/compat/compat_strcasestr.o
+OBJS += platform/libretro/libretro-common/encodings/encoding_utf.o
+OBJS += platform/libretro/libretro-common/compat/compat_strl.o
+ifeq "$(USE_LIBRETRO_VFS)" "1"
+OBJS += platform/libretro/libretro-common/compat/compat_posix_string.o
+OBJS += platform/libretro/libretro-common/compat/fopen_utf8.o
+OBJS += platform/libretro/libretro-common/streams/file_stream.o
+OBJS += platform/libretro/libretro-common/streams/file_stream_transforms.o
 endif
 endif
 ifeq "$(USE_LIBRETRO_VFS)" "1"
@@ -416,6 +430,10 @@ ifneq (,$(findstring -flto,$(CFLAGS)))
 # to avoid saving and reloading it. However, this collides with the use of LTO.
 pico/32x/memory.o: CFLAGS += -fno-lto
 pico/32x/sh2soc.o: CFLAGS += -fno-lto
+cpu/sh2/compiler.o: CFLAGS += -fno-lto
+endif
+ifneq (,$(filter mips64%, $(ARCH))$(filter %mips32r2, $(CFLAGS)))
+CFLAGS += -DMIPS_USE_SYNCI # mips32r2 clear_cache uses SYNCI instead of a syscall
 endif
 endif
 
