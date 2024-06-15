@@ -116,8 +116,7 @@ PicoDrive.zip: $(TARGET)
 	mkdir .od_data
 	cp -r platform/linux/skin .od_data
 	cp platform/game_def.cfg .od_data
-	cp $< .od_data/PicoDrive
-	$(STRIP) .od_data/PicoDrive
+	$(STRIP) $< -o .od_data/picodrive
 	cd .od_data && zip -9 -r ../$@ *
 all: PicoDrive.zip
 endif
@@ -128,8 +127,7 @@ ifeq "$(PLATFORM)" "opendingux"
 	mkdir .od_data
 	cp -r platform/opendingux/data/. .od_data
 	cp platform/game_def.cfg .od_data
-	cp $< .od_data/PicoDrive
-	$(STRIP) .od_data/PicoDrive
+	$(STRIP) $< -o .od_data/picodrive
 .PHONY: .od_data
 
 ifneq (,$(filter %__DINGUX__, $(CFLAGS)))
@@ -339,7 +337,9 @@ ZSTD_OBJS += $(ZSTD)/common/entropy_common.o $(ZSTD)/common/error_private.o
 ZSTD_OBJS += $(ZSTD)/common/fse_decompress.o $(ZSTD)/common/xxhash.o
 ZSTD_OBJS += $(ZSTD)/common/zstd_common.o
 ZSTD_OBJS += $(ZSTD)/decompress/huf_decompress.o
+#ifneq (,$(filter x86%, $(ARCH)))
 ZSTD_OBJS += $(ZSTD)/decompress/huf_decompress_amd64.o
+#endif
 ZSTD_OBJS += $(ZSTD)/decompress/zstd_ddict.o
 ZSTD_OBJS += $(ZSTD)/decompress/zstd_decompress_block.o
 ZSTD_OBJS += $(ZSTD)/decompress/zstd_decompress.o
