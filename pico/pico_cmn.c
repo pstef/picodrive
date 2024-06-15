@@ -81,7 +81,7 @@ static __inline void SekAimM68k(int cyc, int mult)
 static __inline void SekRunM68k(int cyc)
 {
   // TODO 0x100 would be 2 cycles/128, moreover far too sensitive
-  SekAimM68k(cyc, 0x10c); // OutRunners, testpico, VDPFIFOTesting
+  SekAimM68k(cyc, 0x108); // OutRunners, testpico, VDPFIFOTesting
   SekSyncM68k(0);
 }
 
@@ -125,6 +125,12 @@ static void do_timing_hacks_start(struct PicoVideo *pv)
   int cycles = PicoVideoFIFOHint();
 
   SekCyclesBurn(cycles); // prolong cpu HOLD if necessary
+  if (pv->status & PVS_Z80WAIT) {
+    Pico.t.z80c_cnt += cycles_68k_to_z80(cycles);
+    if (!(pv->status & (PVS_CPUWR|PVS_CPURD)))
+      pv->status &= ~PVS_Z80WAIT;
+  }
+
   // XXX how to handle Z80 bus cycle stealing during DMA correctly?
   if ((Pico.t.z80_buscycles -= cycles) < 0)
     Pico.t.z80_buscycles = 0;
@@ -142,7 +148,6 @@ static int PicoFrameHints(void)
   skip = PicoIn.skipFrame;
 
   Pico.t.m68c_frame_start = Pico.t.m68c_aim;
-  z80_resetCycles();
   PsndStartFrame();
 
   hint = pv->hint_cnt;
@@ -340,6 +345,7 @@ static int PicoFrameHints(void)
   PsndGetSamples(y);
 
   timers_cycle(cycles_68k_to_z80(Pico.t.m68c_aim - Pico.t.m68c_frame_start));
+  z80_resetCycles();
 
   pv->hint_cnt = hint;
 

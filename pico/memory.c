@@ -204,20 +204,20 @@ u32 PicoRead16_floating(u32 a)
   // faking open bus
   u32 d = (Pico.m.rotate += 0x41);
   d ^= (d << 5) ^ (d << 8);
-  if ((a & 0xff0000) == 0xa10000) d = 0; // MegaCD pulldowns don't work here curiously
+  if ((a & 0xff0000) == 0xa10000) return d; // MegaCD pulldowns don't work here curiously
   return (PicoIn.AHW & PAHW_MCD) ? 0x00 : d; // pulldown if MegaCD2 attached
 }
 
 static u32 m68k_unmapped_read8(u32 a)
 {
   elprintf(EL_UIO, "m68k unmapped r8  [%06x] @%06x", a, SekPc);
-  return (u8)PicoRead16_floating(a);
+  return a < 0x400000 ? 0 : (u8)PicoRead16_floating(a);
 }
 
 static u32 m68k_unmapped_read16(u32 a)
 {
   elprintf(EL_UIO, "m68k unmapped r16 [%06x] @%06x", a, SekPc);
-  return PicoRead16_floating(a);
+  return a < 0x400000 ? 0 : PicoRead16_floating(a);
 }
 
 static void m68k_unmapped_write8(u32 a, u32 d)
@@ -530,20 +530,21 @@ void NOINLINE ctl_write_z80busreq(u32 d)
   {
     if (d)
     {
-      Pico.t.z80c_cnt = z80_cycles_from_68k() + (Pico.t.z80_busdelay >> 8);
+      Pico.t.z80c_aim = Pico.t.z80c_cnt = z80_cycles_from_68k() + (Pico.t.z80_busdelay >> 8) + 2;
       Pico.t.z80_busdelay &= 0xff;
     }
     else
     {
       if ((PicoIn.opt & POPT_EN_Z80) && !Pico.m.z80_reset) {
-        // Z80 grants bus 2 cycles after the next M cycle, even within an insn
+        // Z80 grants bus after the current M cycle, even within an insn
         // simulate this by accumulating the last insn overhang in busdelay
-        unsigned granted = z80_cycles_from_68k() + 6;
+        unsigned granted;
         pprof_start(m68k);
         PicoSyncZ80(SekCyclesDone());
+        pprof_end_sub(m68k);
+        granted = Pico.t.z80c_aim + 6; // M cycle is 3-6 cycles 
         Pico.t.z80_busdelay += (Pico.t.z80c_cnt - granted) << 8;
         Pico.t.z80c_cnt = granted;
-        pprof_end_sub(m68k);
       }
     }
     Pico.m.z80Run = d;
@@ -563,12 +564,14 @@ void NOINLINE ctl_write_z80reset(u32 d)
         PicoSyncZ80(SekCyclesDone());
         pprof_end_sub(m68k);
       }
+      Pico.t.z80_busdelay &= 0xff; // also resets bus request
+      Pico.video.status &= ~PVS_Z80WAIT;
       YM2612ResetChip();
       timers_reset();
     }
     else
     {
-      Pico.t.z80c_cnt = z80_cycles_from_68k() + 2;
+      Pico.t.z80c_aim = Pico.t.z80c_cnt = z80_cycles_from_68k() + 2;
       z80_reset();
     }
     Pico.m.z80_reset = d;
@@ -1367,8 +1370,11 @@ void PicoWrite16_32x(u32 a, u32 d) {}
 static void access_68k_bus(int delay) // bus delay as Q8
 {
   // TODO: if the 68K is in DMA wait, Z80 has to wait until DMA ends
-  if (Pico.video.status & (PVS_CPUWR|PVS_CPURD))
+  if (Pico.video.status & (PVS_CPUWR|PVS_CPURD)) {
     z80_subCLeft(z80_cyclesLeft); // rather rough on both condition and action
+    // TODO the next line will cause audio lag in Overdrive 2 demo?
+    //Pico.video.status |= PVS_Z80WAIT;
+  }
 
   // 68k bus access delay for z80. The fractional part needs to be accumulated
   // until an additional cycle is full. That is then added to the integer part.

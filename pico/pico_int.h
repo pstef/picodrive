@@ -299,6 +299,7 @@ extern SH2 sh2s[2];
 #define PVS_DMAFILL   (1 << 20) // DMA fill is waiting for fill data
 #define PVS_DMABG     (1 << 21) // background DMA operation is running
 #define PVS_FIFORUN   (1 << 22) // FIFO is processing
+#define PVS_Z80WAIT   (1 << 23) // Z80 blocked by VDP DMA
 
 struct PicoVideo
 {
@@ -523,6 +524,7 @@ struct mcd_pcm
 #define PCD_ST_S68K_SLEEP   4
 #define PCD_ST_S68K_POLL   16
 #define PCD_ST_M68K_POLL   32
+#define PCD_ST_CDD_CMD     64
 #define PCD_ST_S68K_IFL2   0x100
 
 struct mcd_misc
@@ -639,7 +641,7 @@ struct Pico32x
   unsigned int emu_flags;
   unsigned char sh2irq_mask[2];
   unsigned char sh2irqi[2];      // individual
-  unsigned int sh2irqs;          // common irqs
+  unsigned int pad4;             // was sh2irqs
   unsigned short dmac_fifo[DMAC_FIFO_LEN];
   unsigned int pad[4];
   unsigned int dmac0_fifo_ptr;
@@ -958,6 +960,7 @@ int PicoVideoFIFOHint(void);
 void PicoVideoFIFOMode(int active, int h40);
 int PicoVideoFIFOWrite(int count, int byte_p, unsigned sr_mask, unsigned sr_flags);
 void PicoVideoInit(void);
+void PicoVideoReset(void);
 void PicoVideoSync(int skip);
 void PicoVideoSave(void);
 void PicoVideoLoad(void);
@@ -966,6 +969,7 @@ void PicoVideoCacheSAT(int load);
 // misc.c
 PICO_INTERNAL_ASM void memcpy16bswap(unsigned short *dest, void *src, int count);
 PICO_INTERNAL_ASM void memset32(void *dest, int c, int count);
+PICO_INTERNAL_ASM void memset32_uncached(int *dest, int c, int count);
 
 // eeprom.c
 void EEPROM_write8(unsigned int a, unsigned int d);
