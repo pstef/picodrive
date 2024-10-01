@@ -177,7 +177,7 @@ else ifeq ($(platform), tvos-arm64)
 	CC_AS   = perl ./tools/gas-preprocessor.pl $(CC)
 	CC      = cc -arch arm64 -isysroot $(IOSSDK)
 	CXX     = c++ -arch arm64 -isysroot $(IOSSDK)
-	CFLAGS += -marm -DARM -D__aarch64__=1 
+	CFLAGS += -DARM -D__aarch64__=1 
 	CFLAGS += -DIOS
 
 # Lightweight PS3 Homebrew SDK
