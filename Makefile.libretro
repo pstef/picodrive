@@ -179,6 +179,11 @@ else ifeq ($(platform), tvos-arm64)
 	CXX     = c++ -arch arm64 -isysroot $(IOSSDK)
 	CFLAGS += -DARM -D__aarch64__=1
 	CFLAGS += -DIOS
+	MINVERSION = -mappletvos-version-min=11.0
+	CC     += $(MINVERSION)
+	CXX    += $(MINVERSION)
+	CC_AS  += $(MINVERSION)
+	CFLAGS += $(MINVERSION)
 
 # Lightweight PS3 Homebrew SDK
 else ifneq (,$(filter $(platform), ps3 psl1ght))
