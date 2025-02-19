@@ -419,7 +419,7 @@ void funcname(struct TileStrip *ts, int lflags, int cellskip)		\
   if (ts->hscroll & 0x0f) {						\
     int adj = ((ts->hscroll ^ dx) >> 3) & 1;				\
     cell -= adj + 1;							\
-    ts->cells -= adj;							\
+    ts->cells -= adj + 1;						\
     PicoMem.vsram[0x3e] = PicoMem.vsram[0x3f] = lflags >> 16;		\
   }									\
   cell+=cellskip;							\
@@ -629,8 +629,9 @@ static void DrawWindow(int tstart, int tend, int prio, int sh,
   tend<<=1;
 
   // Draw tiles across screen:
-  if (!sh)
+  if (!sh || !prio)
   {
+    sh = (sh ? 0x80 : 0x00); // sh and low prio -> shadow
     for (; tilex < tend; tilex++)
     {
       int dx, pal;
@@ -640,15 +641,15 @@ static void DrawWindow(int tstart, int tend, int prio, int sh,
         est->rendstatus |= PDRAW_WND_DIFF_PRIO;
         continue;
       }
+
       if (code==blank) continue;
-
       dx = 8 + (tilex << 3);
-
       DrawTile(~0,yshift,ymask,code,0);
     }
   }
   else
   {
+    sh = lflags; // sh and high prio -> no shadow (lflags to suppress warning)
     for (; tilex < tend; tilex++)
     {
       int dx, pal;
@@ -659,18 +660,13 @@ static void DrawWindow(int tstart, int tend, int prio, int sh,
         continue;
       }
 
-      pal=((code>>9)&0x30);
+      // sh and high prio -> clear shadow
+      int *zb = (int *)(est->HighCol+8+(tilex<<3));
+      *zb++ &= 0x7f7f7f7f;
+      *zb   &= 0x7f7f7f7f;
 
-      if (prio) {
-        int *zb = (int *)(est->HighCol+8+(tilex<<3));
-        *zb++ &= 0x7f7f7f7f;
-        *zb   &= 0x7f7f7f7f;
-      } else {
-        pal |= 0x80;
-      }
       if(code==blank) continue;
       dx = 8 + (tilex << 3);
-
       DrawTile(~0,yshift,ymask,code,0);
     }
   }

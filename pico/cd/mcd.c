@@ -79,6 +79,7 @@ PICO_INTERNAL void PicoPowerMCD(void)
   Pico_mcd->s68k_regs[3] = 1; // 2M word RAM mode, m68k access
   if (Pico.romsize == 0) // no HINT vector from gate array for MSU
     memset(Pico_mcd->bios + 0x70, 0xff, 4);
+  pcd_event_schedule_s68k(PCD_EVENT_CDC, 12500000/75);
 }
 
 void pcd_soft_reset(void)
@@ -105,15 +106,17 @@ PICO_INTERNAL int PicoResetMCD(void)
   // reset button doesn't affect MCD hardware
 
   // use Pico.sv.data for RAM cart
-  if (PicoIn.opt & POPT_EN_MCD_RAMCART) {
-    if (Pico.sv.data == NULL)
-      Pico.sv.data = calloc(1, 0x12000);
+  if (Pico.romsize == 0) {
+    if (PicoIn.opt & POPT_EN_MCD_RAMCART) {
+      if (Pico.sv.data == NULL)
+        Pico.sv.data = calloc(1, 0x12000);
+    }
+    else if (Pico.sv.data != NULL) {
+      free(Pico.sv.data);
+      Pico.sv.data = NULL;
+    }
+    Pico.sv.start = Pico.sv.end = 0; // unused
   }
-  else if (Pico.sv.data != NULL) {
-    free(Pico.sv.data);
-    Pico.sv.data = NULL;
-  }
-  Pico.sv.start = Pico.sv.end = 0; // unused
 
   msd_reset();
   return 0;
@@ -171,12 +174,12 @@ static void pcd_cdc_event(unsigned int now)
     Pico_mcd->s68k_regs[0x4b] = 0xf0;
   }
 
-  msd_update();
-
   if ((Pico_mcd->s68k_regs[0x33] & PCDS_IEN4) && (Pico_mcd->s68k_regs[0x37] & 4)) {
     elprintf(EL_INTS|EL_CD, "s68k: cdd irq 4");
     pcd_irq_s68k(4, 1);
   }
+
+  msd_update();
 
   pcd_event_schedule(now, PCD_EVENT_CDC, 12500000/75);
 }

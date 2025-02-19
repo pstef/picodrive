@@ -77,6 +77,7 @@ extern void *p32x_bios_g, *p32x_bios_m, *p32x_bios_s;
 #define POPT_DIS_FM_SSGEG   (1<<23)
 #define POPT_EN_FM_DAC      (1<<24) //x00 0000
 #define POPT_EN_FM_FILTER   (1<<25)
+#define POPT_EN_KBD         (1<<26)
 
 #define PAHW_MCD    (1<<0)
 #define PAHW_32X    (1<<1)
@@ -132,6 +133,8 @@ typedef struct PicoInterface
 
 	void (*mcdTrayOpen)(void);
 	void (*mcdTrayClose)(void);
+
+	unsigned int kbd;   // PS/2 peripherals, e.g. Pico Keyboard
 } PicoInterface;
 
 extern PicoInterface PicoIn;
@@ -151,6 +154,33 @@ struct PicoEState;
 
 // pico.c
 #define XPCM_BUFFER_SIZE 64
+enum {
+  PKEY_RELEASED = 0,
+  PKEY_DOWN,
+  PKEY_UP,
+};
+enum {
+  PSHIFT_RELEASED = 0,
+  PSHIFT_DOWN,
+  PSHIFT_UP_HELD_DOWN,
+  PSHIFT_RELEASED_HELD_DOWN,
+  PSHIFT_UP
+};
+typedef struct
+{
+    uint8_t i;
+    uint8_t mode;
+    uint8_t neg;
+    uint8_t has_read;
+    uint8_t caps_lock;
+    uint8_t has_caps_lock;
+    uint32_t mem;
+    uint64_t start_time_keydown;
+    uint64_t time_keydown;
+    uint8_t key_state;
+    uint8_t shift_state;
+    uint8_t active;
+} picohw_kb;
 typedef struct
 {
 	int pen_pos[2];
@@ -160,6 +190,7 @@ typedef struct
 	unsigned int reserved[3];
 	unsigned char xpcm_buffer[XPCM_BUFFER_SIZE+4];
 	unsigned char *xpcm_ptr;
+	picohw_kb kb;
 } picohw_state;
 extern picohw_state PicoPicohw;
 

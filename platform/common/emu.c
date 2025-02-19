@@ -23,6 +23,7 @@
 #include "../libpicofe/readpng.h"
 #include "../libpicofe/plat.h"
 #include "emu.h"
+#include "keyboard.h"
 #include "input_pico.h"
 #include "menu_pico.h"
 #include "config_file.h"
@@ -58,6 +59,13 @@ int pico_pen_x = 320/2, pico_pen_y = 240/2;
 int pico_inp_mode;
 int flip_after_sync;
 int engineState = PGS_Menu;
+
+int kbd_mode;
+struct vkbd *vkbd;
+
+static int pico_page;
+static int pico_w, pico_h;
+static u16 *pico_overlay;
 
 static short __attribute__((aligned(4))) sndBuffer[2*54000/50];
 
@@ -596,6 +604,31 @@ int emu_swap_cd(const char *fname)
 	return 1;
 }
 
+int emu_play_tape(const char *fname)
+{
+	int ret;
+
+	ret = PicoPlayTape(fname);
+	if (ret != 0) {
+		menu_update_msg("loading tape failed");
+		return 0;
+	}
+	return 1;
+}
+
+int emu_record_tape(const char *ext)
+{
+	int ret;
+
+	fname_ext(static_buff, sizeof(static_buff), "tape"PATH_SEP, ext, rom_fname_loaded);
+	ret = PicoRecordTape(static_buff);
+	if (ret != 0) {
+		menu_update_msg("recording tape failed");
+		return 0;
+	}
+	return 1;
+}
+
 // <base dir><end>
 void emu_make_path(char *buff, const char *end, int size)
 {
@@ -860,9 +893,9 @@ char *emu_get_save_fname(int load, int is_sram, int slot, int *time)
 
 	if (is_sram)
 	{
-		strcpy(ext, (PicoIn.AHW & PAHW_MCD) ? ".brm" : ".srm");
+		strcpy(ext, (PicoIn.AHW & PAHW_MCD) && Pico.romsize == 0 ? ".brm" : ".srm");
 		romfname_ext(saveFname, sizeof(static_buff),
-			(PicoIn.AHW & PAHW_MCD) ? "brm"PATH_SEP : "srm"PATH_SEP, ext);
+			(PicoIn.AHW & PAHW_MCD) && Pico.romsize == 0 ? "brm"PATH_SEP : "srm"PATH_SEP, ext);
 		if (!load)
 			return saveFname;
 
@@ -936,7 +969,7 @@ int emu_save_load_game(int load, int sram)
 		int sram_size;
 		unsigned char *sram_data;
 		int truncate = 1;
-		if (PicoIn.AHW & PAHW_MCD)
+		if ((PicoIn.AHW & PAHW_MCD) && Pico.romsize == 0)
 		{
 			if (PicoIn.opt & POPT_EN_MCD_RAMCART) {
 				sram_size = 0x12000;
@@ -963,7 +996,7 @@ int emu_save_load_game(int load, int sram)
 			ret = fread(sram_data, 1, sram_size, sramFile);
 			ret = ret > 0 ? 0 : -1;
 			fclose(sramFile);
-			if ((PicoIn.AHW & PAHW_MCD) && (PicoIn.opt&POPT_EN_MCD_RAMCART))
+			if ((PicoIn.AHW & PAHW_MCD) && Pico.romsize == 0 && (PicoIn.opt&POPT_EN_MCD_RAMCART))
 				memcpy(Pico_mcd->bram, sram_data, 0x2000);
 		} else {
 			// sram save needs some special processing
@@ -1049,10 +1082,6 @@ void emu_reset_game(void)
 	reset_timing = 1;
 }
 
-static int pico_page;
-static int pico_w, pico_h;
-static u16 *pico_overlay;
-
 static u16 *load_pico_overlay(int page, int w, int h)
 {
 	static const char *pic_exts[] = { "png", "PNG" };
@@ -1127,9 +1156,14 @@ void run_events_pico(unsigned int events)
 	}
 	if (events & PEV_PICO_PNEXT) {
 		PicoPicohw.page++;
-		if (PicoPicohw.page > 6)
-			PicoPicohw.page = 6;
-		emu_status_msg("Page %i", PicoPicohw.page);
+		if (PicoPicohw.page > 7)
+			PicoPicohw.page = 7;
+		if (PicoPicohw.page == 7) {
+			// Used in games that require the Keyboard Pico peripheral
+			emu_status_msg("Test Page");
+		} else {
+			emu_status_msg("Page %i", PicoPicohw.page);
+		}
 	}
 	if (events & PEV_PICO_STORY) {
 		if (pico_inp_mode == 1) {
@@ -1160,6 +1194,9 @@ void run_events_pico(unsigned int events)
 		pico_inp_mode = 0;
 		emu_status_msg("Input: D-Pad");
 	}
+
+	PicoPicohw.kb.active = (PicoIn.opt & POPT_EN_KBD ? kbd_mode : 0);
+
 	if (pico_inp_mode == 0)
 		return;
 
@@ -1253,10 +1290,6 @@ static void run_events_ui(unsigned int which)
 		}
 		plat_status_msg_busy_done();
 	}
-	if (which & PEV_SWITCH_RND)
-	{
-		plat_video_toggle_renderer(1, 0);
-	}
 	if (which & (PEV_SSLOT_PREV|PEV_SSLOT_NEXT))
 	{
 		if (which & PEV_SSLOT_PREV) {
@@ -1272,6 +1305,22 @@ static void run_events_ui(unsigned int which)
 		emu_status_msg("SAVE SLOT %i [%s]", state_slot,
 			emu_check_save_file(state_slot, NULL) ? "USED" : "FREE");
 	}
+	if (which & PEV_SWITCH_RND)
+	{
+		plat_video_toggle_renderer(1, 0);
+	}
+	if (which & PEV_SWITCH_KBD)
+	{
+		if (! (PicoIn.opt & POPT_EN_KBD)) {
+			kbd_mode = 0;
+			emu_status_msg("No keyboard configured");
+		} else {
+			kbd_mode = !kbd_mode;
+			emu_status_msg("Keyboard %s", kbd_mode ? "on" : "off");
+		}
+		if (! kbd_mode)
+			plat_video_clear_buffers();
+	}
 	if (which & PEV_RESET)
 		emu_reset_game();
 	if (which & PEV_MENU)
@@ -1282,8 +1331,10 @@ void emu_update_input(void)
 {
 	static int prev_events = 0;
 	int actions[IN_BINDTYPE_COUNT] = { 0, };
+	int actions_kbd[IN_BIND_LAST] = { 0, };
 	int pl_actions[4];
-	int events;
+	int count_kbd = 0;
+	int events, i;
 
 	in_update(actions);
 
@@ -1292,35 +1343,71 @@ void emu_update_input(void)
 	pl_actions[2] = actions[IN_BINDTYPE_PLAYER34];
 	pl_actions[3] = actions[IN_BINDTYPE_PLAYER34] >> 16;
 
-	PicoIn.pad[0] = pl_actions[0] & 0xfff;
-	PicoIn.pad[1] = pl_actions[1] & 0xfff;
-	PicoIn.pad[2] = pl_actions[2] & 0xfff;
-	PicoIn.pad[3] = pl_actions[3] & 0xfff;
-
-	if (pl_actions[0] & 0x7000)
-		do_turbo(&PicoIn.pad[0], pl_actions[0]);
-	if (pl_actions[1] & 0x7000)
-		do_turbo(&PicoIn.pad[1], pl_actions[1]);
-	if (pl_actions[2] & 0x7000)
-		do_turbo(&PicoIn.pad[2], pl_actions[2]);
-	if (pl_actions[3] & 0x7000)
-		do_turbo(&PicoIn.pad[3], pl_actions[3]);
-
 	events = actions[IN_BINDTYPE_EMU] & PEV_MASK;
+
+	if (kbd_mode) {
+		int mask = (PicoIn.AHW & PAHW_PICO ? 0xf : 0x0);
+		if (currentConfig.keyboard == 2)
+			count_kbd = in_update_kbd(actions_kbd);
+		else if (currentConfig.keyboard == 1)
+			count_kbd = vkbd_update(vkbd, pl_actions[0], actions_kbd);
+
+		// FIXME: Only passthrough joystick input to avoid collisions
+		// with PS/2 bindings. Ideally we should check if the device this
+		// input originated from is the same as the device used for
+		// PS/2 input, and passthrough if they are different devices.
+		PicoIn.pad[0] = pl_actions[0] & mask;
+		PicoIn.pad[1] = pl_actions[1] & mask;
+		PicoIn.pad[2] = pl_actions[2] & mask;
+		PicoIn.pad[3] = pl_actions[3] & mask;
+
+		// Ignore events mapped to bindings that collide with PS/2 peripherals.
+		// Note that calls to emu_set_fastforward() should be avoided as well,
+		// since fast-forward activates even with parameter set_on = 0.
+		events &= PEV_SWITCH_KBD;
+	} else {
+		PicoIn.pad[0] = pl_actions[0] & 0xfff;
+		PicoIn.pad[1] = pl_actions[1] & 0xfff;
+		PicoIn.pad[2] = pl_actions[2] & 0xfff;
+		PicoIn.pad[3] = pl_actions[3] & 0xfff;
+
+		if (pl_actions[0] & 0x7000)
+			do_turbo(&PicoIn.pad[0], pl_actions[0]);
+		if (pl_actions[1] & 0x7000)
+			do_turbo(&PicoIn.pad[1], pl_actions[1]);
+		if (pl_actions[2] & 0x7000)
+			do_turbo(&PicoIn.pad[2], pl_actions[2]);
+		if (pl_actions[3] & 0x7000)
+			do_turbo(&PicoIn.pad[3], pl_actions[3]);
+
+		if ((events ^ prev_events) & PEV_FF) {
+			emu_set_fastforward(events & PEV_FF);
+			plat_update_volume(0, 0);
+			reset_timing = 1;
+		}
+	}
 
 	// volume is treated in special way and triggered every frame
 	if (events & (PEV_VOL_DOWN|PEV_VOL_UP))
 		plat_update_volume(1, events & PEV_VOL_UP);
 
-	if ((events ^ prev_events) & PEV_FF) {
-		emu_set_fastforward(events & PEV_FF);
-		plat_update_volume(0, 0);
-		reset_timing = 1;
-	}
-
 	events &= ~prev_events;
 
-	if (PicoIn.AHW == PAHW_PICO)
+	// update keyboard input, actions only updated if keyboard mode active
+	PicoIn.kbd = 0;
+	for (i = 0; i < count_kbd; i++) {
+		if (actions_kbd[i]) {
+			unsigned int key = (actions_kbd[i] & 0xff);
+			if (key == PEVB_KBD_LSHIFT || key == PEVB_KBD_RSHIFT ||
+			    key == PEVB_KBD_CTRL || key == PEVB_KBD_FUNC) {
+				PicoIn.kbd = (PicoIn.kbd & 0x00ff) | (key << 8);
+			} else {
+				PicoIn.kbd = (PicoIn.kbd & 0xff00) | key;
+			}
+		}
+	}
+
+	if (PicoIn.AHW & PAHW_PICO)
 		run_events_pico(events);
 	if (events)
 		run_events_ui(events);
@@ -1387,6 +1474,7 @@ void emu_init(void)
 	mkdir_path(path, pos, "mds");
 	mkdir_path(path, pos, "srm");
 	mkdir_path(path, pos, "brm");
+	mkdir_path(path, pos, "tape");
 	mkdir_path(path, pos, "cfg");
 
 	pprof_init();
@@ -1483,6 +1571,15 @@ static void emu_loop_prep(void)
 	}
 
 	plat_target_gamma_set(currentConfig.gamma, 0);
+
+	vkbd = NULL;
+	if (currentConfig.keyboard == 1) {
+		if (PicoIn.AHW & PAHW_SMS) vkbd = vkbd_init(0);
+		else if (PicoIn.AHW & PAHW_PICO) vkbd = vkbd_init(1);
+	}
+	PicoIn.opt &= ~POPT_EN_KBD;
+	if (((PicoIn.AHW & PAHW_PICO) || (PicoIn.AHW & PAHW_SC)) && currentConfig.keyboard)
+		PicoIn.opt |= POPT_EN_KBD;
 
 	pemu_loop_prep();
 }

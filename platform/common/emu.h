@@ -93,6 +93,7 @@ typedef struct _currentConfig_t {
 	int filter;  // EOPT_FILTER_* video filter
 	int ghosting;
 	int analog_deadzone;
+	int keyboard;
 	int msh2_khz;
 	int ssh2_khz;
 	int overclock_68k;
@@ -106,6 +107,8 @@ extern int config_slot, config_slot_current;
 extern unsigned char *movie_data;
 extern int reset_timing;
 extern int flip_after_sync;
+extern int kbd_mode;
+extern struct vkbd *vkbd;
 
 #define PICO_PEN_ADJUST_X 1
 #define PICO_PEN_ADJUST_Y 1
@@ -136,6 +139,8 @@ void  emu_loop(void);
 
 int   emu_reload_rom(const char *rom_fname_in);
 int   emu_swap_cd(const char *fname);
+int   emu_play_tape(const char *fname);
+int   emu_record_tape(const char *ext);
 int   emu_save_load_game(int load, int sram);
 void  emu_reset_game(void);
 

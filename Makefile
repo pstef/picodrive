@@ -183,7 +183,7 @@ else
 LDFLAGS += -lEGL -lGLESv2 # on raspi GLESv1_CM is included in GLESv2
 endif
 OBJS += platform/linux/emu.o platform/linux/blit.o # FIXME
-OBJS += platform/common/plat_sdl.o platform/common/input_sdlkbd.o
+OBJS += platform/common/plat_sdl.o platform/common/inputmap_kbd.o
 OBJS += platform/libpicofe/plat_sdl.o platform/libpicofe/in_sdl.o
 OBJS += platform/libpicofe/linux/plat.o
 USE_FRONTEND = 1
@@ -298,7 +298,7 @@ ifeq "$(USE_FRONTEND)" "1"
 
 # common
 OBJS += platform/common/main.o platform/common/emu.o platform/common/upscale.o \
-	platform/common/menu_pico.o platform/common/config_file.o
+	platform/common/menu_pico.o platform/common/keyboard.o platform/common/config_file.o
 
 # libpicofe
 OBJS += platform/libpicofe/input.o platform/libpicofe/readpng.o \
